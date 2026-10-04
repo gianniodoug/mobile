@@ -132,7 +132,7 @@ DWA_LETHAL_DIST = 0.0  # m     distance en dessous de laquelle on bloque
 DWA_W_HEADING = 0.2  # poids cap vers le but
 DWA_W_CLEARANCE = 0.1  # poids distance aux obstacles
 DWA_W_VELOCITY = 0.1  # poids vitesse (favorise les trajectoires rapides)
-DWA_W_GOAL_DIST = 0.2  # poids distance euclidienne au but
+DWA_W_GOAL_DIST = 0.3  # poids distance euclidienne au but
 
 # Seuils d'arrivée
 NAV_GOAL_DIST_TOL = 0.15  # m     on considère le but atteint
