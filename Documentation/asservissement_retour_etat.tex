@@ -1,0 +1,610 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[french]{babel}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{tikz}
+\usetikzlibrary{positioning,fit,arrows.meta}
+\tikzset{
+  blk/.style={draw, thick, minimum height=0.8cm, minimum width=0.9cm, align=center, fill=white},
+  sm/.style={draw, thick, circle, inner sep=0pt, minimum size=0.45cm},
+  sig/.style={-{Latex[length=2mm]}, thick},
+  pt/.style={circle, fill, inner sep=1.2pt},
+  lbl/.style={font=\small},
+  sgn/.style={font=\scriptsize},
+}
+% Unités sans siunitx
+\newcommand{\SI}[2]{\ensuremath{#1\,\mathrm{#2}}}
+\newcommand{\si}[1]{\ensuremath{\mathrm{#1}}}
+
+\newcommand{\vect}[1]{\boldsymbol{#1}}
+\newcommand{\T}{\mathsf{T}}
+\newcommand{\Tm}{\vect{T}}
+
+\title{Asservissement des roues par retour d'état\\avec action intégrale}
+\author{Robot mecanum 4 roues -- Navigation}
+\date{}
+
+\begin{document}
+\maketitle
+
+%==================================================================
+\section*{Notations}
+
+Les notations ci-dessous sont utilisées dans tout le document.
+Une grandeur en gras est un vecteur de $\mathbb R^4$.
+L'indice $i\in\{FL,FR,BR,BL\}$ désigne une roue, l'indice $j\in\{x,y,\theta,t\}$ désigne un mode,
+et l'indice $c$ désigne une consigne.
+
+\begin{center}
+\begin{tabular}{>{$}l<{$}ll}
+\toprule
+\text{Symbole} & Signification & Unité\\
+\midrule
+\multicolumn{3}{l}{\emph{Espace des roues}}\\
+n_i,\ \vect n & vitesse mesurée d'une roue & RPM\\
+n_{c,i},\ \vect n_c & consigne de vitesse d'une roue (\texttt{setrpm}) & RPM\\
+r_i,\ \vect r & commande d'une roue exprimée en vitesse & RPM\\
+u_i,\ \vect u & PWM envoyée à l'Arduino & $[-255,255]$\\
+P_i & caractéristique statique $u\mapsto n$ (polynôme) & RPM\\
+\midrule
+\multicolumn{3}{l}{\emph{Espace des modes}}\\
+\Tm & matrice de passage roues $\rightarrow$ modes & --\\
+z_j,\ \vect z=\Tm\vect n & vitesse modale & RPM\\
+z_{c,j},\ \vect z_c=\Tm\vect n_c & consigne modale & RPM\\
+\rho_j,\ \vect\rho=\Tm\vect r & commande modale & RPM\\
+q_j,\ \vect q & intégrale de l'erreur modale (= position) & RPM$\cdot$s\\
+\midrule
+\multicolumn{3}{l}{\emph{Robot}}\\
+v_x,\ v_y & vitesses linéaires du robot (repère robot) & m/s\\
+\theta,\ \dot\theta & cap et vitesse de rotation & rad, rad/s\\
+d & écart latéral à la trajectoire rectiligne & m\\
+v_0 & vitesse d'avance nominale & m/s\\
+\midrule
+\multicolumn{3}{l}{\emph{Réglage}}\\
+\tau & constante de temps d'une roue & s\\
+k_{1,j},\ k_{2,j},\ m_j & gains du mode $j$ & --, \si{s^{-1}}, --\\
+\omega_0,\ \xi & pulsation propre et amortissement imposés & rad/s, --\\
+\Delta t,\ h & période d'échantillonnage, fenêtre de la moyenne encodeurs & s\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\paragraph{Chaîne de commande.}
+Le correcteur calcule $\vect\rho$ (modes). On en déduit $\vect r$ (roues, en RPM), puis $\vect u$ (PWM) :
+\[
+\underbrace{(\vect z,\vect q)}_{\text{mesures}}
+\ \xrightarrow{\ \text{retour d'état}\ }\ \vect\rho
+\ \xrightarrow{\ \vect r=\Tm^\T\vect\rho\ }\ \vect r
+\ \xrightarrow{\ u_i=P_i^{-1}(r_i)\ }\ \vect u
+\ \xrightarrow{\ \text{moteurs}\ }\ \vect n
+\ \xrightarrow{\ \vect z=\Tm\vect n\ }\ \vect z .
+\]
+
+%==================================================================
+\section{Schéma bloc}\label{sec:schema}
+
+La figure~\ref{fig:schema} représente la boucle telle qu'elle est implémentée.
+Les flèches épaisses portent des vecteurs de $\mathbb R^4$.
+Tout est calculé sur la Raspberry Pi (\texttt{control.py} et \texttt{state\_feedback.py}), sauf le bloc « Arduino, moteurs, roues ».
+
+\begin{figure}[h!]
+\centering
+\begin{tikzpicture}[lbl]
+  % ---- ligne directe
+  \node[lbl] (in) at (0,0) {$\vect n_c$};
+  \node[blk] (Tc) at (1.2,0) {$\Tm$};
+  \coordinate (bz) at (2.2,0);
+  \node[blk] (M) at (3.4,0) {$\vect M$};
+  \node[sm] (s1) at (5.0,0) {};
+  \node[blk] (TT) at (6.6,0) {$\Tm^\T$};
+  \node[blk] (Pi) at (8.2,0) {$P_i^{-1}$};
+  \node[blk, minimum width=2cm] (G) at (10.4,0) {Arduino,\\ moteurs, roues};
+  \coordinate (bn) at (12.1,0);
+  % ---- correcteur
+  \node[sm] (s3) at (2.2,-1.7) {};
+  \node[blk] (I) at (3.4,-1.7) {$\displaystyle\int$};
+  \node[blk] (K) at (5.0,-1.7) {$\vect K$};
+  % ---- retour
+  \node[blk] (Tf) at (10.4,-1.7) {$\Tm$};
+  \coordinate (bk) at (7.6,-1.7);
+  \node[blk, dashed, minimum width=2cm] (loc) at (10.4,-4.2) {localisation\\ (odom.\ + ICP)};
+
+  % ---- signaux
+  \draw[sig] (in) -- (Tc);
+  \draw[thick] (Tc) -- (bz);
+  \node[pt] at (bz) {};
+  \node[above] at (bz) {$\vect z_c$};
+  \draw[sig] (bz) -- (M);
+  \draw[sig] (M) -- (s1);
+  \draw[sig] (s1) -- node[above]{$\vect\rho$} (TT);
+  \draw[sig] (TT) -- node[above]{$\vect r$} (Pi);
+  \draw[sig] (Pi) -- node[above]{$\vect u$} (G);
+  \draw[thick] (G) -- node[above]{$\vect n$} (bn);
+  \node[pt] at (bn) {};
+  \draw[sig] (bn) -- (12.7,0);
+  \draw[sig] (bn) -- node[right, align=left]{encodeurs\\ $\vect n$} (12.1,-1.7) -- (Tf);
+  \draw[thick] (Tf) -- node[above]{$\vect z$} (bk);
+  \node[pt] at (bk) {};
+  \draw[sig] (bk) -- (K);
+  \draw[sig] (bk) -- (7.6,-3.0) -- (2.2,-3.0) -- (s3);
+  \draw[sig] (bz) -- (s3);
+  \draw[sig] (s3) -- (I);
+  \draw[sig] (I) -- node[above]{$\vect q$} (K);
+  \draw[sig] (K) -- (s1);
+  % ---- pose (pointillés)
+  \draw[sig, dashed] (12.1,-1.7) -- (12.1,-4.2) -- (loc);
+  \draw[sig, dashed] (loc) -- node[below, pos=0.5]{pose $\rightarrow q_\theta,\ q_y$ en ligne droite (§\ref{sec:pose})} (3.4,-4.2) -- (I);
+  % ---- signes
+  \node[sgn] at (4.65,0.3) {$+$};
+  \node[sgn] at (5.3,-0.4) {$-$};
+  \node[sgn] at (2.5,-1.3) {$-$};
+  \node[sgn] at (2.5,-2.1) {$+$};
+  % ---- correcteur
+  \node[draw, dashed, gray, rounded corners, fit=(s3)(M)(K)(s1)(I), inner sep=6pt,
+        label={[gray, font=\scriptsize]above left:correcteur modal (§\ref{sec:aug})}] {};
+\end{tikzpicture}
+\caption{Schéma bloc de l'asservissement implémenté.
+Le bloc $\vect K=[\vect K_1\ \ \vect K_2]$ agit sur l'état augmenté $\vect x=(\vect z,\ \vect q)$ : $\vect K\vect x=\vect K_1\vect z+\vect K_2\vect q$,
+avec $\vect K_1=\operatorname{diag}(k_{1,j})$, $\vect K_2=\operatorname{diag}(k_{2,j})$ et $\vect M=\vect I_4+\vect K_1$.
+Les deux blocs $\Tm$ passent des roues aux modes ; le bloc $\Tm^\T$ revient des modes aux roues.}
+\label{fig:schema}
+\end{figure}
+
+On reconnaît la structure du cours (p.~39 et 43) : $\vect\rho=-\vect K\vect x+\vect M\vect z_c=-\vect K_1\vect z-\vect K_2\vect q+\vect M\vect z_c$.
+La seule différence est que le « système » vu par le correcteur est la chaîne
+$\Tm^\T\rightarrow P_i^{-1}\rightarrow\text{moteurs}\rightarrow\Tm$, qui transforme $\vect\rho$ en $\vect z$.
+
+\paragraph{Correspondance avec le code.}
+\begin{center}
+\begin{tabular}{>{$}l<{$}ll}
+\toprule
+\text{Signal} & Variable dans le code & Origine\\
+\midrule
+\vect n_c & \texttt{wc.target\_rpm} & \texttt{/robot/command} (\texttt{setrpm}, \texttt{automatic})\\
+\vect n & \texttt{wc.current\_rpm} & \texttt{/robot/encoders}\\
+\vect z_c,\ \vect z & \texttt{sf.z\_c}, \texttt{sf.z} & calculés dans \texttt{state\_feedback.py}\\
+\vect q & \texttt{sf.q} & idem (ou pose de \texttt{/robot/pos})\\
+\vect\rho,\ \vect r & \texttt{sf.rho}, \texttt{sf.r} & idem\\
+\vect u & \texttt{msg.*\_wheel\_speed} & \texttt{/robot/wheels} $\rightarrow$ Arduino\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+%==================================================================
+\section{Cinématique}
+
+Constantes : $R=\SI{0{,}0325}{m}$ (rayon des roues) et $L=L_X+L_Y=\SI{0{,}20}{m}$.
+
+La cinématique de \texttt{localization.py}, avec les roues dans l'ordre FL, FR, BR, BL et les vitesses en RPM, s'écrit :
+\begin{align}
+v_x&=\tfrac{R}{4}\tfrac{\pi}{30}\,(\phantom{-}n_{FL}+n_{FR}+n_{BR}+n_{BL}),\\
+v_y&=\tfrac{R}{4}\tfrac{\pi}{30}\,(-n_{FL}+n_{FR}-n_{BR}+n_{BL}),\\
+\dot\theta&=\tfrac{R}{4L}\tfrac{\pi}{30}\,(-n_{FL}+n_{FR}+n_{BR}-n_{BL}).
+\end{align}
+
+%==================================================================
+\section{La matrice $\Tm$}
+
+\subsection{Définition et rôle}
+
+Chaque parenthèse ci-dessus est un « motif » de rotation des roues.
+On range ces motifs en lignes et on ajoute un quatrième motif, la torsion, qui ne fait pas bouger le robot :
+\begin{equation}
+\Tm=\frac12
+\begin{pmatrix}
+ 1 & 1 & 1 & 1\\
+-1 & 1 &-1 & 1\\
+-1 & 1 & 1 &-1\\
+ 1 & 1 &-1 &-1
+\end{pmatrix}
+\begin{array}{l}
+\leftarrow \text{mode } x\ \text{(avance)}\\
+\leftarrow \text{mode } y\ \text{(latéral)}\\
+\leftarrow \text{mode } \theta\ \text{(rotation)}\\
+\leftarrow \text{mode } t\ \text{(torsion)}
+\end{array}
+\qquad
+\vect z=\Tm\vect n .
+\end{equation}
+$z_j$ mesure « combien » du motif $j$ est présent dans les vitesses des roues :
+c'est la projection de $\vect n$ sur le motif $j$.
+On passe ainsi d'une description par roue (FL, FR, BR, BL) à une description par mouvement du robot (avance, latéral, rotation, torsion).
+La déviation du robot se lit alors directement sur $z_\theta$ et $z_y$.
+
+Liens avec les vitesses physiques :
+\begin{equation}
+z_x=c_v\,v_x,\qquad z_y=c_v\,v_y,\qquad z_\theta=c_\theta\,\dot\theta,
+\qquad
+c_v=\frac{2}{R}\frac{30}{\pi}\approx\SI{587{,}6}{RPM\cdot s/m},
+\quad
+c_\theta=\frac{2L}{R}\frac{30}{\pi}\approx\SI{117{,}5}{RPM\cdot s/rad}.
+\end{equation}
+
+\subsection{Pourquoi $\Tm^\T\Tm=\vect I_4$}
+
+Le coefficient $(i,j)$ de $\Tm\Tm^\T$ est le produit scalaire de la ligne $i$ par la ligne $j$.
+\begin{itemize}
+\item Deux lignes différentes sont orthogonales. Par exemple, $x\cdot y=\tfrac14(-1+1-1+1)=0$ et $\theta\cdot t=\tfrac14(-1+1-1+1)=0$. Les six paires se vérifient de la même façon.
+\item Chaque ligne est de norme $1$ : $\tfrac14(1+1+1+1)=1$. C'est le rôle du facteur $\tfrac12$.
+\end{itemize}
+Donc $\Tm\Tm^\T=\vect I_4$.
+Comme $\Tm$ est carrée, $\Tm^\T$ est alors son inverse, et l'on a aussi $\Tm^\T\Tm=\vect I_4$.
+On dit que $\Tm$ est \emph{orthogonale}.
+
+\subsection{Pourquoi c'est utile}\label{sec:T-utile}
+
+\begin{enumerate}
+\item \textbf{Retour aux roues sans calcul d'inverse.}
+Le correcteur produit $\vect\rho$ dans l'espace des modes, et il faut des commandes par roue :
+\begin{equation}
+\vect r=\Tm^{-1}\vect\rho=\Tm^\T\vect\rho .
+\end{equation}
+
+\item \textbf{Découplage.}
+Si les quatre roues ont la même dynamique, chaque mode $z_j$ obéit à une équation indépendante des autres modes.
+On le règle donc séparément (démonstration en section~\ref{sec:modele}).
+L'inversibilité de $\Tm$ suffirait pour ce point. L'orthogonalité garantit en plus les deux points suivants.
+
+\item \textbf{Même échelle pour tous les modes.}
+$\|\vect z\|=\|\vect n\|$ et $\|\vect\rho\|=\|\vect r\|$.
+Une correction de \SI{10}{RPM} sur un mode se traduit par $\pm\SI{5}{RPM}$ sur chaque roue, quel que soit le mode.
+Les gains et les poids LQ des différents modes sont donc comparables.
+De même, un bruit de mesure de variance $\sigma^2$ sur chaque roue (indépendant d'une roue à l'autre) donne un bruit de même variance $\sigma^2$ sur chaque mode : $\Tm(\sigma^2\vect I)\Tm^\T=\sigma^2\vect I$.
+
+\item \textbf{Intérêt de régler les modes séparément.}
+Avec les mêmes gains $k$ sur tous les modes, on obtient $\Tm^\T(k\vect I)\Tm=k\vect I$ :
+la loi est strictement identique à quatre correcteurs indépendants, un par roue.
+Le gain apporté par l'approche d'état vient donc du fait de donner des gains \emph{différents} aux modes $y$ et $\theta$, qui portent la déviation.
+\end{enumerate}
+
+%==================================================================
+\section{Caractéristique PWM $\rightarrow$ RPM et linéarisation}\label{sec:lin}
+
+\texttt{wheelBenchmark.cpp} augmente la PWM de 40 à 254 par pas de 2.
+À chaque pas, il attend \SI{0{,}5}{s} puis mesure la vitesse pendant \SI{1}{s}.
+Une régression donne, pour chaque roue, un polynôme $n_i=P_i(u_i)$ (\texttt{control.py}), par exemple :
+\begin{equation}
+P_{FL}(u)=2{,}543\cdot10^{-5}u^3-0{,}01625\,u^2+3{,}696\,u-136{,}4 .
+\end{equation}
+Le gain local $G_i=\mathrm dP_i/\mathrm du$ varie fortement d'un point de fonctionnement à l'autre :
+\begin{center}
+\begin{tabular}{lcccccc}
+\toprule
+Roue & Zone morte & $P_i(255)$ & \multicolumn{2}{c}{à \SI{100}{RPM}} & \multicolumn{2}{c}{à \SI{150}{RPM}}\\
+     & (PWM)      & (RPM)      & PWM & $G_i$ & PWM & $G_i$\\
+\midrule
+FL & $<45$ & 171 & 103 & 1,15 & 178 & 0,33\\
+FR & $<63$ & 167 & 128 & 0,96 & 218 & 0,39\\
+BR & $<34$ & 171 & 121 & 0,99 & 208 & 0,30\\
+BL & $<43$ & 174 & 103 & 1,13 & 176 & 0,37\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\paragraph{Linéarisation.}
+On envoie $u_i=P_i^{-1}(r_i)$, calculé par dichotomie (\texttt{binary\_search}).
+En régime permanent, on obtient alors $n_i=P_i\big(P_i^{-1}(r_i)\big)=r_i$.
+Le gain statique de $r_i$ vers $n_i$ vaut $1$ pour toutes les roues et à toutes les vitesses.
+C'est ce qui rend les roues « identiques » (section~\ref{sec:modele}).
+
+%==================================================================
+\section{Modèle des roues et dynamique des modes}\label{sec:modele}
+
+\subsection{Modèle d'une roue (hypothèse)}
+
+La dynamique d'une roue n'est pas connue : on la \emph{suppose} du premier ordre.
+C'est le modèle classique d'un motoréducteur à courant continu, dont la constante de temps électrique
+(quelques ms) est négligeable devant la constante de temps mécanique.
+Grâce à la linéarisation de la section~\ref{sec:lin}, le gain statique vaut $1$ :
+\begin{equation}
+\tau\,\dot n_i(t)=-n_i(t)+r_i(t),\qquad i\in\{FL,FR,BR,BL\}.
+\end{equation}
+En régime permanent ($\dot n_i=0$), on retrouve bien $n_i=r_i$.
+La valeur $\tau\approx\SI{0{,}1}{s}$ est provisoire : elle doit être mesurée (section~\ref{sec:ident}).
+
+Hypothèses du modèle :
+\begin{enumerate}
+\item les quatre roues ont la même constante de temps $\tau$ ;
+\item leur gain statique vaut $1$ (polynômes $P_i$ à jour) ;
+\item chaque roue ne dépend que de sa propre commande : on néglige l'influence du châssis et du sol, qui relient les roues entre elles.
+\end{enumerate}
+
+\subsection{Écriture vectorielle}
+
+On empile les quatre équations :
+\begin{equation}
+\tau\,\dot{\vect n}=-\vect n+\vect r .
+\end{equation}
+
+\subsection{Dynamique des modes}
+
+La dynamique des modes n'est pas mesurée : elle se \emph{déduit} du modèle des roues.
+On multiplie l'équation vectorielle à gauche par $\Tm$ :
+\begin{equation}
+\tau\,\Tm\dot{\vect n}=-\Tm\vect n+\Tm\vect r .
+\end{equation}
+$\Tm$ est constante, donc $\Tm\dot{\vect n}=\frac{\mathrm d}{\mathrm dt}(\Tm\vect n)=\dot{\vect z}$.
+Par définition, $\Tm\vect n=\vect z$ et $\Tm\vect r=\vect\rho$. On obtient :
+\begin{equation}
+\boxed{\ \tau\,\dot{\vect z}=-\vect z+\vect\rho\ }
+\qquad\Longleftrightarrow\qquad
+\tau\,\dot z_j=-z_j+\rho_j\quad\text{pour chaque mode } j\in\{x,y,\theta,t\}.
+\end{equation}
+Chaque mode est un premier ordre, de même $\tau$ que les roues, et ne dépend que de sa propre commande $\rho_j$.
+
+\paragraph{Exemple (mode rotation).}
+La ligne $\theta$ de $\Tm$ donne $z_\theta=\tfrac12(-n_{FL}+n_{FR}+n_{BR}-n_{BL})$. Alors :
+\[
+\tau\dot z_\theta
+=\tfrac12\big(-\tau\dot n_{FL}+\tau\dot n_{FR}+\tau\dot n_{BR}-\tau\dot n_{BL}\big)
+=\tfrac12\big(-(r_{FL}-n_{FL})+(r_{FR}-n_{FR})+(r_{BR}-n_{BR})-(r_{BL}-n_{BL})\big)
+=\rho_\theta-z_\theta .
+\]
+
+\subsection{Si les roues ne sont pas identiques}
+
+Si chaque roue a sa propre constante $\tau_i$, on pose $\vect D=\operatorname{diag}(1/\tau_i)$. Alors :
+\begin{equation}
+\dot{\vect z}=-\big(\Tm\vect D\Tm^\T\big)\vect z+\big(\Tm\vect D\Tm^\T\big)\vect\rho .
+\end{equation}
+$\Tm\vect D\Tm^\T$ n'est diagonale que si tous les $\tau_i$ sont égaux.
+Sinon, les modes sont légèrement couplés, d'autant plus que les $\tau_i$ diffèrent.
+L'action intégrale corrige ce petit écart au modèle. L'identification (section~\ref{sec:ident}) permet de vérifier que les $\tau_i$ sont proches.
+
+%==================================================================
+\section{Système augmenté d'un mode (action intégrale)}\label{sec:aug}
+
+Pour un mode $j$ de consigne $z_{c,j}$ constante, on ajoute l'état intégral :
+\begin{equation}
+q_j(t)=\int_0^t\big(z_j(s)-z_{c,j}\big)\,\mathrm ds .
+\end{equation}
+
+\paragraph{$q_j$ est une position.}
+$z_j$ est une vitesse, donc $q_j$ est l'écart entre la position parcourue dans le mode $j$ et la position de consigne.
+Par exemple, pour la rotation : $q_\theta=c_\theta(\theta-\theta_c)$.
+
+\paragraph{Représentation d'état.}
+L'état augmenté est $\vect x_j=(z_j,\ q_j)^\T$ :
+\begin{equation}
+\dot{\vect x}_j=
+\underbrace{\begin{pmatrix}-1/\tau & 0\\ 1 & 0\end{pmatrix}}_{\vect A_a}\vect x_j
++\underbrace{\begin{pmatrix}1/\tau\\ 0\end{pmatrix}}_{\vect B_a}\rho_j
++\begin{pmatrix}0\\ -1\end{pmatrix}z_{c,j}.
+\end{equation}
+La première ligne est une accélération, la seconde l'écart de vitesse.
+La vitesse n'apparaît donc qu'une fois dans $\dot{\vect x}_j$.
+
+\paragraph{Commande (cours p.~39 et 43).}
+On applique un retour d'état et une anticipation de consigne :
+\begin{equation}
+\rho_j=-\vect K_j\vect x_j+m_j\,z_{c,j}=-k_{1,j}\,z_j-k_{2,j}\,q_j+m_j\,z_{c,j},
+\qquad m_j=1+k_{1,j}.
+\end{equation}
+Avec ce choix de $m_j$, on peut aussi écrire $\rho_j=z_{c,j}-k_{1,j}(z_j-z_{c,j})-k_{2,j}q_j$.
+
+\paragraph{Schéma bloc d'un mode.}
+D'après la section~\ref{sec:modele}, la chaîne $\Tm^\T\rightarrow P_i^{-1}\rightarrow\text{moteurs}\rightarrow\Tm$
+de la figure~\ref{fig:schema} équivaut, pour chaque mode, à un premier ordre $1/(1+\tau s)$.
+La figure~\ref{fig:fig-mode} montre la boucle obtenue, sur laquelle on place les pôles.
+
+\begin{figure}[h!]
+\centering
+\begin{tikzpicture}[lbl]
+  \node[lbl] (in) at (0,0) {$z_{c,j}$};
+  \coordinate (bz) at (1.1,0);
+  \node[blk] (m) at (2.3,0) {$m_j$};
+  \node[sm] (s1) at (4.1,0) {};
+  \node[blk] (G) at (6.2,0) {$\dfrac{1}{1+\tau s}$};
+  \coordinate (bo) at (8.0,0);
+  \node[sm] (s3) at (1.1,-1.6) {};
+  \node[blk] (I) at (2.3,-1.6) {$\dfrac1s$};
+  \node[blk] (K) at (4.1,-1.6) {$\vect K_j$};
+  \coordinate (bk) at (6.2,-1.6);
+
+  \draw[sig] (in) -- (bz) -- (m);
+  \node[pt] at (bz) {};
+  \draw[sig] (m) -- (s1);
+  \draw[sig] (s1) -- node[above]{$\rho_j$} (G);
+  \draw[thick] (G) -- node[above]{$z_j$} (bo);
+  \node[pt] at (bo) {};
+  \draw[sig] (bo) -- (8.7,0);
+  \draw[thick] (bo) -- (8.0,-1.6) -- node[above]{$z_j$} (bk);
+  \node[pt] at (bk) {};
+  \draw[sig] (bk) -- (K);
+  \draw[sig] (bk) -- (6.2,-2.8) -- (1.1,-2.8) -- (s3);
+  \draw[sig] (bz) -- (s3);
+  \draw[sig] (s3) -- (I);
+  \draw[sig] (I) -- node[above]{$q_j$} (K);
+  \draw[sig] (K) -- (s1);
+  \node[sgn] at (3.75,0.3) {$+$};
+  \node[sgn] at (4.4,-0.4) {$-$};
+  \node[sgn] at (1.4,-1.2) {$-$};
+  \node[sgn] at (1.4,-2.0) {$+$};
+  \node[draw, dashed, gray, rounded corners, fit=(G), inner sep=5pt,
+        label={[gray, font=\scriptsize, align=center]above:$\Tm^\T$, $P_i^{-1}$, moteurs, $\Tm$}] {};
+\end{tikzpicture}
+\caption{Boucle équivalente pour un mode $j\in\{x,y,\theta,t\}$ (une boucle par mode, toutes indépendantes).
+Le bloc $\vect K_j$ reçoit l'état augmenté $\vect x_j=(z_j,\ q_j)$ et renvoie $\vect K_j\vect x_j=k_{1,j}z_j+k_{2,j}q_j$.}
+\label{fig:fig-mode}
+\end{figure}
+
+
+\paragraph{Conditions d'existence (cours p.~41).}
+\begin{equation}
+\operatorname{rang}\big[\vect B_a\ \ \vect A_a\vect B_a\big]
+=\operatorname{rang}\begin{pmatrix}1/\tau & -1/\tau^2\\ 0 & 1/\tau\end{pmatrix}=2,
+\qquad
+\det\begin{pmatrix}-1/\tau & 1/\tau\\ 1 & 0\end{pmatrix}=-\frac1\tau\neq0 .
+\end{equation}
+
+\paragraph{Boucle fermée.}
+\begin{equation}
+\vect A_a-\vect B_a\vect K_j=
+\begin{pmatrix}-\dfrac{1+k_{1,j}}{\tau} & -\dfrac{k_{2,j}}{\tau}\\[2mm] 1 & 0\end{pmatrix},
+\qquad
+\chi_j(s)=s^2+\frac{1+k_{1,j}}{\tau}\,s+\frac{k_{2,j}}{\tau}.
+\end{equation}
+
+\paragraph{Régime permanent.}
+On pose $\dot q_j=0$, ce qui donne $z_j=z_{c,j}$ : il n'y a pas d'erreur statique, même avec une perturbation constante.
+Avec $\dot z_j=0$, on trouve ensuite $q_j=0$ en l'absence de perturbation.
+
+%==================================================================
+\section{Placement de pôles}\label{sec:poles}
+
+On impose $\chi_j(s)=s^2+2\xi\omega_0 s+\omega_0^2$, c'est-à-dire des pôles en
+$\lambda_{1,2}=-\xi\omega_0\pm j\,\omega_0\sqrt{1-\xi^2}$. On en déduit :
+\begin{equation}
+\boxed{\,k_{1,j}=2\xi\omega_0\tau-1,\qquad k_{2,j}=\omega_0^2\,\tau,\qquad m_j=1+k_{1,j}\,}
+\end{equation}
+
+Valeurs proposées pour $\tau=\SI{0{,}1}{s}$ :
+\begin{center}
+\begin{tabular}{lccccc}
+\toprule
+Modes & $\omega_0$ (rad/s) & $\xi$ & Pôles & $\vect K_j=[k_{1,j}\ \ k_{2,j}]$ & $m_j$\\
+\midrule
+$x$, $t$ & 6 & 0,9 & $-5{,}4\pm2{,}62j$ & $[0{,}08\ \ 3{,}6]$ & 1,08\\
+$y$, $\theta$ & 8 & 0,9 & $-7{,}2\pm3{,}49j$ & $[0{,}44\ \ 6{,}4]$ & 1,44\\
+\bottomrule
+\end{tabular}
+\end{center}
+Les modes $y$ et $\theta$, qui portent la déviation, sont réglés plus raides que l'avance.
+
+\paragraph{Contrainte liée à la mesure.}
+La moyenne glissante des encodeurs, de fenêtre $h$, introduit un retard d'environ $h/2$.
+Il faut $\omega_0\,h/2\lesssim0{,}4$, d'où $h=\SI{0{,}1}{s}$ publié à \SI{50}{Hz}.
+Avec la configuration actuelle ($h=\SI{0{,}3}{s}$, \SI{10}{Hz}), la simulation donne \SI{52}{\%} de dépassement pour $\omega_0=8$.
+
+%==================================================================
+\section{Mesurer $q_\theta$ et $q_y$ avec la pose du robot}\label{sec:pose}
+
+Pour une consigne en ligne droite ($z_{c,y}=z_{c,\theta}=0$), avec $(x_0,y_0,\theta_0)$ la pose à l'instant de la consigne :
+\begin{align}
+q_\theta&=c_\theta\,(\theta-\theta_0),\\
+q_y&=c_v\,d,\qquad d=-\sin\theta_0\,(x-x_0)+\cos\theta_0\,(y-y_0).
+\end{align}
+La pose $(x,y,\theta)$ est lue sur \texttt{/robot/pos}.
+Si cette pose provient uniquement des encodeurs, on retrouve exactement l'intégrale de la section~\ref{sec:aug}.
+L'intérêt vient de la correction ICP du lidar, qui voit le glissement des rouleaux.
+
+Pour le mode $x$, on garde l'intégrale calculée aux encodeurs.
+Si l'on bouclait sur la position $x$ et que le robot était bloqué, $q_x$ divergerait (emballement de l'intégrateur).
+
+%==================================================================
+\section{Variante : modes $y$ et $\theta$ couplés (commande LQ)}
+
+À vitesse d'avance $v_0$, une erreur de cap crée une dérive latérale :
+\begin{equation}
+\dot d=v_x\sin(\theta-\theta_0)+v_y\cos(\theta-\theta_0)\approx v_0(\theta-\theta_0)+v_y
+\quad\Longrightarrow\quad
+\dot q_y=z_y+\frac{v_0}{L}\,q_\theta ,
+\end{equation}
+car $c_v/c_\theta=1/L$.
+On regroupe les modes $y$ et $\theta$ dans un seul système d'état :
+\begin{equation}
+\vect x=\begin{pmatrix}z_y\\ z_\theta\\ q_\theta\\ q_y\end{pmatrix},\quad
+\dot{\vect x}=
+\underbrace{\begin{pmatrix}
+-1/\tau & 0 & 0 & 0\\
+0 & -1/\tau & 0 & 0\\
+0 & 1 & 0 & 0\\
+1 & 0 & v_0/L & 0
+\end{pmatrix}}_{\vect A}\vect x+
+\underbrace{\frac1\tau\begin{pmatrix}1&0\\0&1\\0&0\\0&0\end{pmatrix}}_{\vect B}
+\begin{pmatrix}\rho_y\\ \rho_\theta\end{pmatrix},
+\quad
+\begin{pmatrix}\rho_y\\ \rho_\theta\end{pmatrix}=-\vect K\vect x .
+\end{equation}
+Le système est commandable (rang 4).
+On minimise $J=\int_0^\infty(\vect x^\T\vect Q\vect x+\vect\rho^\T\vect R\vect\rho)\,\mathrm dt$,
+avec des poids choisis par normalisation (cours p.~29) :
+\begin{equation}
+\vect Q=\operatorname{diag}\!\Big(\tfrac1{50^2},\ \tfrac1{50^2},\ \tfrac1{(c_\theta\cdot2^\circ)^2},\ \tfrac1{(c_v\cdot\SI{0{,}02}{m})^2}\Big),
+\qquad \vect R=\tfrac1{20^2}\vect I_2 .
+\end{equation}
+Pour $v_0=\SI{0{,}34}{m/s}$ (\SI{100}{RPM}), on obtient :
+\begin{equation}
+\vect K=\begin{pmatrix}0{,}22 & 0{,}04 & 0{,}67 & 1{,}64\\ 0{,}04 & 0{,}47 & 5{,}09 & 0{,}46\end{pmatrix},
+\qquad
+\operatorname{Sp}(\vect A-\vect B\vect K)=\{-1{,}72;\ -5{,}10;\ -9{,}46;\ -10{,}65\}.
+\end{equation}
+$\vect K$ dépend de $v_0$ : on le recalcule (\texttt{lqr}) pour chaque vitesse nominale.
+
+%==================================================================
+\section{Loi de commande complète (période $\Delta t=\SI{20}{ms}$)}
+
+On note $\vect K_1=\operatorname{diag}(k_{1,j})$, $\vect K_2=\operatorname{diag}(k_{2,j})$ et $\vect M=\vect I_4+\vect K_1$.
+À chaque pas $k$ :
+\begin{align}
+\vect z_k&=\Tm\,\vect n_k,\qquad \vect z_c=\Tm\,\vect n_c, && \text{(passage aux modes)}\\
+\vect q_{k+1}&=\vect q_k+\Delta t\,(\vect z_k-\vect z_c), && \text{(sauf $q_\theta,q_y$ : §\ref{sec:pose})}\\
+\vect\rho_k&=-\vect K_1\vect z_k-\vect K_2\vect q_k+\vect M\vect z_c, && \text{(retour d'état)}\\
+\vect r_k&=\Tm^\T\vect\rho_k, && \text{(retour aux roues)}\\
+u_{i,k}&=\operatorname{sat}_{[-255,\,255]}\Big(\operatorname{sign}(r_{i,k})\,P_i^{-1}\big(|r_{i,k}|\big)\Big). && \text{(linéarisation)}
+\end{align}
+\paragraph{Anti-emballement (anti-windup).} Si une roue sature, on n'intègre pas $\vect q$ à ce pas (intégration conditionnelle).
+
+%==================================================================
+\section{Exemple : que vaut $\vect\rho$ après \texttt{setrpm 100} ?}
+
+\paragraph{$\vect\rho$ est une grandeur interne.}
+L'utilisateur ne donne jamais de consigne $(x,y,\theta)$ : il fixe seulement $\vect n_c$ (\texttt{setrpm}).
+La consigne modale $\vect z_c=\Tm\vect n_c$ n'est qu'une réécriture de $\vect n_c$, calculée dans \texttt{control.py}.
+De même, $\vect\rho$ n'est jamais envoyé : il est immédiatement converti en $\vect r=\Tm^\T\vect\rho$, puis en PWM.
+
+\paragraph{Sans erreur, la commande est la consigne.}
+Si $\vect z=\vect z_c$ et $\vect q=\vect 0$, alors $\vect\rho=\vect z_c$ et
+$\vect r=\Tm^\T\Tm\,\vect n_c=\vect n_c$ (ici sert $\Tm^\T\Tm=\vect I_4$).
+On envoie alors $u_i=P_i^{-1}(n_{c,i})$ : c'est l'anticipation seule.
+Dans tous les cas, on peut écrire
+\begin{equation}
+\vect\rho=\vect z_c+\underbrace{\big(-\vect K_1(\vect z-\vect z_c)-\vect K_2\vect q\big)}_{\text{correction modale}},
+\qquad
+\vect r=\vect n_c+\Tm^\T\big(-\vect K_1(\vect z-\vect z_c)-\vect K_2\vect q\big).
+\end{equation}
+
+\paragraph{Application numérique.}
+On prend $\vect n_c=(100,100,100,100)$, d'où
+$\vect z_c=\Tm\vect n_c=(200,\ 0,\ 0,\ 0)$ : de l'avance, sans latéral ni rotation.
+La consigne « aller droit » est donc implicite : $z_{c,y}=z_{c,\theta}=0$.
+
+Supposons que le robot dévie vers la gauche, avec $\vect n=(96,\ 104,\ 102,\ 98)$ et $\vect q=(0;\ 0{,}5;\ 2;\ 0)$.
+La valeur $q_\theta=2$ correspond à un écart de cap d'environ $1^\circ$.
+\begin{center}
+\begin{tabular}{lcccc}
+\toprule
+ & $x$ & $y$ & $\theta$ & $t$\\
+\midrule
+$\vect z=\Tm\vect n$ & 200 & 2 & 6 & 0\\
+$\vect\rho$ & $200$ & $-0{,}44\cdot2-6{,}4\cdot0{,}5=-4{,}08$ & $-0{,}44\cdot6-6{,}4\cdot2=-15{,}44$ & 0\\
+\bottomrule
+\end{tabular}
+\end{center}
+\begin{center}
+\begin{tabular}{lcccc}
+\toprule
+ & FL & FR & BR & BL\\
+\midrule
+$\vect r=\Tm^\T\vect\rho$ (RPM) & 109,8 & 90,2 & 94,3 & 105,7\\
+PWM sans correction, $P_i^{-1}(100)$ & 103 & 128 & 121 & 103\\
+PWM envoyée, $u_i=P_i^{-1}(r_i)$ & 112 & 119 & 116 & 108\\
+\bottomrule
+\end{tabular}
+\end{center}
+Les roues gauches sont accélérées et les roues droites ralenties : le robot revient vers la droite.
+
+%==================================================================
+\section{Identification de $\tau$}\label{sec:ident}
+
+On applique un échelon $r_i:0\rightarrow\SI{100}{RPM}$ (donc $u_i=P_i^{-1}(100)$) et on enregistre \texttt{/robot/encoders} avec $h=\SI{0{,}1}{s}$.
+On relève $\tau=t_{63\,\%}-h/2$.
+On vérifie aussi que $n_i\approx\SI{100}{RPM}$ en régime permanent, ce qui valide le gain unitaire.
+On recalcule ensuite $k_{1,j}$, $k_{2,j}$ et $m_j$ avec les formules de la section~\ref{sec:poles}.
+
+\end{document}
