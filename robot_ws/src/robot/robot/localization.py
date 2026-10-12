@@ -49,6 +49,10 @@ class LocalizationNode(Node):
         w_rl = msg.back_left_rpm   * to_rad
         w_rr = msg.back_right_rpm  * to_rad
 
+
+        now = time.time()
+        dt = max(1e-4, min(now - self.last_time, 1.0))
+        self.last_time = now
         if max(abs(w_fl), abs(w_fr), abs(w_rl), abs(w_rr)) < ENCODER_NOISE_THRESHOLD:
             return
 
@@ -57,11 +61,7 @@ class LocalizationNode(Node):
         vy = (WHEEL_RADIUS / 4.0) * (-w_fl + w_fr + w_rl - w_rr)
         wz = (WHEEL_RADIUS / (4.0 * (LX + LY))) * (-w_fl + w_fr - w_rl + w_rr)
 
-        now = time.time()
-        #dt  = now - self.last_time
-        #self.last_time = now
-        dt = max(1e-4, min(now - self.last_time, 1.0))
-        self.last_time = now
+        
 
         # Incrément dans le repère du robot
         # On calcule delta une seule fois et on l'applique aux DEUX positions
