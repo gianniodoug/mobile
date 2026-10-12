@@ -3,6 +3,9 @@ import dearpygui.dearpygui as dpg
 from robot.steady_node import SteadyNode
 from msgs.msg import RPMs, WheelSpeeds
 import numpy as np
+import time
+
+PLOT_HISTORY = 10.0  # Durée affichée sur les graphes (s)
 
 class AsservVisualizer(SteadyNode):
 
@@ -10,7 +13,7 @@ class AsservVisualizer(SteadyNode):
         def __init__(self, wheel_name : str, is_pwm_signal: bool) -> None:
             self.data_x = np.array([])
             self.data_y = np.array([])
-            self.time = 0.0
+            self.start_time = time.time()
             self.cmd_line = None
             self.height = 258 if is_pwm_signal else 180
             self.is_pwm_signal = is_pwm_signal
@@ -27,12 +30,13 @@ class AsservVisualizer(SteadyNode):
                 self.line_series = dpg.add_line_series([], [], parent=self.y_axis)
 
         def add_data(self, rpm):
-            self.time += 0.1 # Assuming 10hz
-            self.data_x = np.append(self.data_x, self.time)
+            # Heure réelle de réception : les topics ne publient pas tous à la même fréquence
+            t = time.time() - self.start_time
+            self.data_x = np.append(self.data_x, t)
             self.data_y = np.append(self.data_y, rpm)
-            if len(self.data_x) > 100:
-                self.data_x = self.data_x[-100:]
-                self.data_y = self.data_y[-100:]
+            keep = self.data_x > t - PLOT_HISTORY
+            self.data_x = self.data_x[keep]
+            self.data_y = self.data_y[keep]
 
             dpg.set_value(self.line_series, [self.data_x, self.data_y])
 
@@ -74,7 +78,7 @@ class AsservVisualizer(SteadyNode):
         self.get_logger().info("Asserv visualizer node successfully launched")
 
     def encoder_callback(self, msg: RPMs):
-        self.get_logger().info(
+        self.get_logger().debug(
             f"received measured RPMS: {msg.front_left_rpm}, {msg.front_right_rpm}, {msg.back_right_rpm}, {msg.back_left_rpm}")
 
         self.wheelPlots[0].add_data(msg.front_left_rpm)

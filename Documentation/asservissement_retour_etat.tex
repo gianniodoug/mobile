@@ -219,9 +219,11 @@ La déviation du robot se lit alors directement sur $z_\theta$ et $z_y$.
 Liens avec les vitesses physiques :
 \begin{equation}
 z_x=c_v\,v_x,\qquad z_y=c_v\,v_y,\qquad z_\theta=c_\theta\,\dot\theta,
-\qquad
+\end{equation}
+avec
+\begin{equation}
 c_v=\frac{2}{R}\frac{30}{\pi}\approx\SI{587{,}6}{RPM\cdot s/m},
-\quad
+\qquad
 c_\theta=\frac{2L}{R}\frac{30}{\pi}\approx\SI{117{,}5}{RPM\cdot s/rad}.
 \end{equation}
 
@@ -340,10 +342,12 @@ Chaque mode est un premier ordre, de même $\tau$ que les roues, et ne dépend q
 \paragraph{Exemple (mode rotation).}
 La ligne $\theta$ de $\Tm$ donne $z_\theta=\tfrac12(-n_{FL}+n_{FR}+n_{BR}-n_{BL})$. Alors :
 \[
+\begin{aligned}
 \tau\dot z_\theta
-=\tfrac12\big(-\tau\dot n_{FL}+\tau\dot n_{FR}+\tau\dot n_{BR}-\tau\dot n_{BL}\big)
-=\tfrac12\big(-(r_{FL}-n_{FL})+(r_{FR}-n_{FR})+(r_{BR}-n_{BR})-(r_{BL}-n_{BL})\big)
+&=\tfrac12\big(-\tau\dot n_{FL}+\tau\dot n_{FR}+\tau\dot n_{BR}-\tau\dot n_{BL}\big)\\
+&=\tfrac12\big(-(r_{FL}-n_{FL})+(r_{FR}-n_{FR})+(r_{BR}-n_{BR})-(r_{BL}-n_{BL})\big)
 =\rho_\theta-z_\theta .
+\end{aligned}
 \]
 
 \subsection{Si les roues ne sont pas identiques}
@@ -602,9 +606,33 @@ Les roues gauches sont accélérées et les roues droites ralenties : le robot r
 %==================================================================
 \section{Identification de $\tau$}\label{sec:ident}
 
-On applique un échelon $r_i:0\rightarrow\SI{100}{RPM}$ (donc $u_i=P_i^{-1}(100)$) et on enregistre \texttt{/robot/encoders} avec $h=\SI{0{,}1}{s}$.
-On relève $\tau=t_{63\,\%}-h/2$.
-On vérifie aussi que $n_i\approx\SI{100}{RPM}$ en régime permanent, ce qui valide le gain unitaire.
-On recalcule ensuite $k_{1,j}$, $k_{2,j}$ et $m_j$ avec les formules de la section~\ref{sec:poles}.
+\paragraph{Principe.}
+On mesure la réponse des moteurs \emph{seuls}, en boucle ouverte : les PWM sont envoyées directement, sans le correcteur.
+Avec \texttt{setrpm}, on mesurerait la boucle fermée, c'est-à-dire les pôles que l'on a soi-même placés, et non le moteur.
+Pour chaque roue, la PWM est calculée avec $P_i^{-1}$, de sorte que les quatre roues visent la même vitesse.
+
+\paragraph{Commande.} Robot sur cales, nœuds \texttt{control}, \texttt{serial} et \texttt{encoders} lancés :
+\begin{center}\texttt{ros2 run robot wheel\_step}\end{center}
+L'essai applique trois fois un échelon $r:\SI{60}{RPM}\rightarrow\SI{120}{RPM}$, soit $u_i=P_i^{-1}(60)\rightarrow P_i^{-1}(120)$.
+L'échelon part d'une vitesse non nulle pour rester hors de la zone morte, où le frottement sec fausserait la mesure.
+
+\paragraph{Modèle ajusté.}
+La réponse mesurée est celle d'un premier ordre, retardée d'un retard pur $d$ (passage par \texttt{control}, le port série et l'Arduino),
+puis vue à travers la moyenne glissante de largeur $h$ des encodeurs.
+Avec $s=t-d$, la réponse normalisée vaut :
+\begin{equation}
+y(t)=
+\begin{cases}
+\dfrac{1}{h}\Big(s-\tau\big(1-e^{-s/\tau}\big)\Big) & 0\le s<h,\\[3mm]
+1-\dfrac{\tau}{h}\Big(e^{-(s-h)/\tau}-e^{-s/\tau}\Big) & s\ge h .
+\end{cases}
+\end{equation}
+On ajuste $\tau$ et $d$ par moindres carrés. La lecture manuelle $\tau\approx t_{63\,\%}-h/2$ surestime $\tau$ de la valeur du retard $d$.
+
+\paragraph{Résultat.}
+L'outil affiche $\tau$ et $d$ pour chaque roue, ainsi que la vitesse atteinte.
+Si celle-ci s'écarte de plus de 5\,\% de \SI{120}{RPM}, les polynômes $P_i$ ne sont plus à jour : il faut les remesurer d'abord (\texttt{wheel\_benchmark}).
+On reporte la moyenne des $\tau$ dans \texttt{WHEEL\_TAU} ; les gains $k_{1,j}$, $k_{2,j}$ et $m_j$ sont alors recalculés automatiquement
+avec les formules de la section~\ref{sec:poles}.
 
 \end{document}

@@ -31,6 +31,7 @@ setup(
             'encoders = robot.encoders:main',
             'wheel_benchmark = robot.wheel_benchmark:main',
             'wheel_fit = robot.wheel_curve_fit:main',
+            'wheel_step = robot.wheel_step:main',
         ],
     },
 )

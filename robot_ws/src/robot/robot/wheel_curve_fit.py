@@ -30,6 +30,18 @@ def load_csv(path: str) -> tuple[np.ndarray, np.ndarray]:
     return pwm, rpm
 
 
+def rpm_to_pwm(coeffs, rpm: float, pwm_max: float = 255.0) -> float:
+    """P^-1 : PWM qui donne rpm (>= 0) en régime permanent, par dichotomie sur [0, pwm_max]."""
+    low, high = 0.0, pwm_max
+    while high - low > 1e-2:
+        mid = (low + high) / 2.0
+        if np.polyval(coeffs, mid) < rpm:
+            low = mid
+        else:
+            high = mid
+    return (low + high) / 2.0
+
+
 def _rmse(coeffs: np.ndarray, u: np.ndarray, n: np.ndarray) -> float:
     return float(np.sqrt(np.mean((np.polyval(coeffs, u) - n) ** 2)))
 
