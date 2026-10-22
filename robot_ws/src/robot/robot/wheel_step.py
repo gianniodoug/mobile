@@ -14,6 +14,9 @@ Pour chaque roue, on ajuste tau et un retard pur d sur la réponse mesurée, en 
 moyenne glissante des encodeurs (fenêtre ENCODER_WINDOW). On vérifie aussi que la vitesse atteinte
 vaut bien rpm_high, c'est-à-dire que les polynômes P_i sont à jour (gain statique = 1).
 
+Au démarrage, l'outil attend d'être connecté au nœud control (abonné à /robot/raw_command) et de
+recevoir des mesures sur /robot/encoders avant d'envoyer la première PWM (découverte ROS ~1 s).
+
 ATTENTION : le robot doit être SUR CALES (roues en l'air). Les nœuds control, serial et encoders doivent tourner.
 
 Usage :
@@ -32,6 +35,8 @@ from msgs.msg import RPMs, WheelSpeeds
 from robot.robot_config import ENCODER_WINDOW, WHEEL_PWM_TO_RPM
 from robot.steady_node import SteadyNode
 from robot.wheel_curve_fit import WHEELS, rpm_to_pwm
+
+WAIT_TIMEOUT = 10.0  # Temps max pour se connecter à control et aux encodeurs (s)
 
 
 def measured_step(t: np.ndarray, tau: float, delay: float, window: float) -> np.ndarray:
@@ -86,8 +91,9 @@ class WheelStep(SteadyNode):
         self.create_subscription(RPMs, "/robot/encoders", self.encoders_callback, 10)
 
         self.repeat = 0
-        self.phase = "low"
+        self.phase = "wait"
         self.phase_start = time.time()
+        self.encoder_msgs = 0
         self.samples: list[list[float]] = []    # [repeat, phase, t depuis l'échelon, FL, FR, BR, BL]
         self.done = False
 
@@ -95,7 +101,7 @@ class WheelStep(SteadyNode):
             f"Echelon {self.rpm_low:.0f} -> {self.rpm_high:.0f} RPM, {self.repeats} fois. "
             f"PWM basses {self.pwm_low}, PWM hautes {self.pwm_high} (FL, FR, BR, BL). Le robot doit être sur cales !"
         )
-        self.send_pwm(self.pwm_low)
+        self.get_logger().info("Attente de la connexion au noeud control et aux encodeurs...")
         self.create_timer(0.01, self.loop)
 
     def send_pwm(self, pwms: list[int]):
@@ -107,7 +113,8 @@ class WheelStep(SteadyNode):
         self.pub_raw_cmd.publish(msg)
 
     def encoders_callback(self, msg: RPMs):
-        if self.done:
+        self.encoder_msgs += 1
+        if self.done or self.phase == "wait":
             return
         t = time.time() - self.phase_start
         if self.phase == "low":
@@ -119,6 +126,25 @@ class WheelStep(SteadyNode):
         if self.done:
             return
         elapsed = time.time() - self.phase_start
+        if self.phase == "wait":
+            control_ok = self.pub_raw_cmd.get_subscription_count() > 0
+            if control_ok and self.encoder_msgs > 0:
+                self.get_logger().info("Connecté : début de l'essai")
+                self.send_pwm(self.pwm_low)
+                self.phase = "low"
+                self.phase_start = time.time()
+            elif elapsed > WAIT_TIMEOUT:
+                if not control_ok:
+                    self.get_logger().error(
+                        "Personne n'écoute /robot/raw_command : le noeud control tourne-t-il ? (ros2 node list)")
+                if self.encoder_msgs == 0:
+                    self.get_logger().error(
+                        "Aucune donnée sur /robot/encoders : le noeud encoders tourne-t-il ? Vérifier "
+                        "`ros2 node list`, `ros2 topic hz /robot/encoders` et que pigpiod est lancé (sudo pigpiod)")
+                self.send_pwm([0, 0, 0, 0])
+                self.done = True
+            return
+
         if self.phase == "low" and elapsed >= self.hold_low:
             self.send_pwm(self.pwm_high)
             self.phase = "high"

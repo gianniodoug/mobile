@@ -8,6 +8,9 @@ Pour chaque palier de PWM (de pwm_start à pwm_end par pas de pwm_step) :
     3. moyenne /robot/encoders pendant measure_time secondes.
 À la fin : arrête les roues, écrit un CSV et affiche l'ajustement des polynômes (wheel_curve_fit.py).
 
+Au démarrage, l'outil attend d'être connecté au nœud control (abonné à /robot/raw_command) et de
+recevoir des mesures sur /robot/encoders avant d'envoyer la première PWM (découverte ROS ~1 s).
+
 ATTENTION : le robot doit être SUR CALES (roues en l'air), la rampe dure plusieurs minutes.
 Les nœuds control, serial et encoders doivent tourner.
 
@@ -26,6 +29,8 @@ import rclpy
 from msgs.msg import RPMs, WheelSpeeds
 from robot.steady_node import SteadyNode
 from robot.wheel_curve_fit import WHEELS, fit_all_wheels, format_report
+
+WAIT_TIMEOUT = 10.0  # Temps max pour se connecter à control et aux encodeurs (s)
 
 
 class WheelBenchmark(SteadyNode):
@@ -59,8 +64,9 @@ class WheelBenchmark(SteadyNode):
         self.create_subscription(RPMs, "/robot/encoders", self.encoders_callback, 10)
 
         self.index = 0
-        self.phase = "settle"
+        self.phase = "wait"
         self.phase_start = time.time()
+        self.encoder_msgs = 0
         self.samples: list[list[float]] = []
         self.rows: list[list[float]] = []
         self.done = False
@@ -70,7 +76,7 @@ class WheelBenchmark(SteadyNode):
             f"Benchmark {self.direction} : {len(self.pwms)} paliers de PWM {self.pwms[0]} à {self.pwms[-1]}, "
             f"durée ~{duration / 60:.1f} min. Le robot doit être sur cales !"
         )
-        self.send_pwm(self.sign * self.pwms[0])
+        self.get_logger().info("Attente de la connexion au noeud control et aux encodeurs...")
         self.create_timer(0.02, self.loop)
 
     def send_pwm(self, pwm: int):
@@ -82,6 +88,7 @@ class WheelBenchmark(SteadyNode):
         self.pub_raw_cmd.publish(msg)
 
     def encoders_callback(self, msg: RPMs):
+        self.encoder_msgs += 1
         if self.phase == "measure":
             self.samples.append([msg.front_left_rpm, msg.front_right_rpm, msg.back_right_rpm, msg.back_left_rpm])
 
@@ -91,7 +98,26 @@ class WheelBenchmark(SteadyNode):
         now = time.time()
         elapsed = now - self.phase_start
 
+        if self.phase == "wait":
+            control_ok = self.pub_raw_cmd.get_subscription_count() > 0
+            if control_ok and self.encoder_msgs > 0:
+                self.get_logger().info("Connecté : début de la rampe")
+                self.send_pwm(self.sign * self.pwms[0])
+                self.phase = "settle"
+                self.phase_start = now
+            elif elapsed > WAIT_TIMEOUT:
+                if not control_ok:
+                    self.get_logger().error(
+                        "Personne n'écoute /robot/raw_command : le noeud control tourne-t-il ? (ros2 node list)")
+                if self.encoder_msgs == 0:
+                    self.get_logger().error(
+                        "Aucune donnée sur /robot/encoders : le noeud encoders tourne-t-il ? Vérifier "
+                        "`ros2 node list`, `ros2 topic hz /robot/encoders` et que pigpiod est lancé (sudo pigpiod)")
+                self.finish()
+            return
+
         if self.phase == "settle" and elapsed >= self.settle_time:
+            self.send_pwm(self.sign * self.pwms[self.index])  # renvoi, au cas où le premier message serait perdu
             self.phase = "measure"
             self.phase_start = now
             self.samples = []
