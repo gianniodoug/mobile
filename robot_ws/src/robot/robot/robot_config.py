@@ -82,11 +82,20 @@ SF_RPM_DEADBAND = 0.5              # |r| en dessous duquel on envoie une PWM nul
 
 # Caractéristique statique P_i : PWM -> RPM de chaque roue (coefficients du degré le plus haut au plus bas)
 # Valable entre la zone morte et PWM = 254. Pour la remesurer : ros2 run robot wheel_benchmark (robot sur cales)
+"""
+# Ancien WHEEL_To_RPM
 WHEEL_PWM_TO_RPM = {
     "frontleft":  [2.543e-05, -0.01625, 3.696, -136.4],
     "frontright": [2.950e-05, -0.01849, 4.246, -202.6],
     "backright":  [2.048e-07, -0.0001161, 0.01932, -0.03627, -16.98],
     "backleft":   [2.307e-05, -0.01485, 3.452, -123.2],
+}
+"""
+WHEEL_PWM_TO_RPM = {
+    "frontleft": [2.6057e-09, -2.2182e-06, 7.5344e-04, -1.3018e-01, 1.1982e+01, -3.6742e+02],
+    "frontright": [5.4371e-07, -3.6903e-04, 8.8180e-02, -7.9992e+00, 2.7108e+02],
+    "backright": [3.9773e-05, -2.4395e-02, 5.4558e+00, -3.1729e+02],
+    "backleft": [-3.1604e-03, 1.6768e+00, -7.3100e+01],
 }
 
 # Timers Periods
