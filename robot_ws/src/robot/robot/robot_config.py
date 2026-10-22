@@ -67,7 +67,7 @@ MAX_ACCUMULATED_ERROR = 1000.0
 # Asservissement par retour d'état modal avec action intégrale
 # (voir Documentation/asservissement_retour_etat.pdf, mêmes notations)
 CONTROL_MODE = "state"  # "state" : retour d'état modal, "pid" : ancien PID par roue
-WHEEL_TAU = 0.1         # Constante de temps d'une roue linéarisée (s), à identifier (pdf, section « Identification de tau »)
+WHEEL_TAU = 0.089         # Constante de temps d'une roue linéarisée (s), à identifier (pdf, section « Identification de tau »)
 SF_XI = 0.9             # Amortissement imposé à chaque mode
 SF_OMEGA0 = {           # Pulsation propre imposée à chaque mode (rad/s)
     "x": 6.0,           # avance
