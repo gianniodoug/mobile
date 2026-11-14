@@ -53,7 +53,7 @@ def measured_step(t: np.ndarray, tau: float, delay: float, window: float) -> np.
 def fit_tau(t: np.ndarray, y: np.ndarray, window: float) -> tuple[float, float, float]:
     """Moindres carrés sur une grille (tau, delay). Renvoie tau, delay, RMSE (normalisée)."""
     best = (math.inf, 0.0, 0.0)
-    for tau in np.arange(0.01, 0.60, 0.002):
+    for tau in np.arange(0.01, TAU_MAX, 0.002):
         for delay in np.arange(0.0, 0.10, 0.005):
             err = float(np.sqrt(np.mean((measured_step(t, tau, delay, window) - y) ** 2)))
             if err < best[0]:
@@ -177,6 +177,8 @@ class WheelStep(SteadyNode):
 
 MIN_STEP_RATIO = 0.3   # une roue dont l'échelon mesuré est < 30 % de l'échelon demandé « ne répond pas »
 MAX_GAIN_ERROR = 0.15  # au-delà de 15 % d'écart à la consigne, la roue est exclue de la moyenne de tau
+MAX_FIT_RMSE = 0.15    # au-delà, la réponse ne ressemble pas à un premier ordre : tau n'est pas fiable
+TAU_MAX = 0.60         # borne haute de la recherche de tau (s)
 
 
 def analyse(samples: np.ndarray, rpm_low: float, rpm_high: float, hold_low: float, hold_high: float,
@@ -219,7 +221,10 @@ def analyse(samples: np.ndarray, rpm_low: float, rpm_high: float, hold_low: floa
         gain_error = (final - rpm_high) / rpm_high
         mark = ""
         if abs(gain_error) > MAX_GAIN_ERROR:
-            mark = "  <- exclue de la moyenne"
+            mark = "  <- exclue : vitesse trop loin de la consigne"
+            problems.append(w)
+        elif err > MAX_FIT_RMSE or tau >= TAU_MAX - 0.01:
+            mark = "  <- exclue : ajustement non fiable (réponse pas du premier ordre)"
             problems.append(w)
         else:
             taus.append(tau)
@@ -231,6 +236,8 @@ def analyse(samples: np.ndarray, rpm_low: float, rpm_high: float, hold_low: floa
         lines += [f"Roues à vérifier : {', '.join(problems)}.",
                   f"Une roue qui ne répond pas, ou dont la vitesse s'écarte de plus de {MAX_GAIN_ERROR:.0%} de la",
                   "consigne, a un problème matériel (moteur, encodeur, câblage) ou un polynôme faux.",
+                  f"Un ajustement non fiable (RMSE fit > {MAX_FIT_RMSE}) signale une réponse irrégulière :",
+                  "batterie faible, roue qui cale au palier bas, ou mesure bruitée.",
                   "Elle est exclue du calcul de tau.", ""]
     if taus:
         lines += [f"Écart entre roues valides : tau de {min(taus):.3f} à {max(taus):.3f} s",
