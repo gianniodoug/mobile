@@ -8,7 +8,7 @@ import math
 #   BL = Back-Left   (arrière-gauche)
 
 # -- Console --
-DEFAULT_RPM = 150.0  # RPM par défaut envoyé aux roues
+DEFAULT_RPM = 80.0  # RPM par défaut envoyé aux roues
 HELP_MESSAGE = """
 Commands :
 - automatic: Sends the robot to a target position. Can be used like so :
@@ -92,10 +92,10 @@ WHEEL_PWM_TO_RPM = {
 }
 """
 WHEEL_PWM_TO_RPM = {
-    "frontleft": [2.6057e-09, -2.2182e-06, 7.5344e-04, -1.3018e-01, 1.1982e+01, -3.6742e+02],
-    "frontright": [5.4371e-07, -3.6903e-04, 8.8180e-02, -7.9992e+00, 2.7108e+02],
-    "backright": [3.9773e-05, -2.4395e-02, 5.4558e+00, -3.1729e+02],
-    "backleft": [-3.1604e-03, 1.6768e+00, -7.3100e+01],
+    "frontleft": [5.3723e-05, -3.1943e-02, 6.4968e+00, -3.2178e+02],
+    "frontright": [8.3184e-01, -6.6373e+01],
+    "backright": [1.8884e-08, -1.6862e-05, 5.9266e-03, -1.0268e+00, 8.8556e+01, -2.9938e+03],
+    "backleft": [1.9234e-05, -1.2508e-02, 3.0576e+00, -1.2814e+02],
 }
 
 # Timers Periods
