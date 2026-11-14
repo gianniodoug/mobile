@@ -1,6 +1,6 @@
 import numpy as np
 from pathlib import Path
-from robot.automatic import Automatic
+from robot.dwa import dwa_plan
 from robot import robot_config as cfg
 
 # Golden file created by benchmarks/dwa_bench.py --save-reference (old DWA)
@@ -15,17 +15,7 @@ def load_reference():
 
 def current_dwa(vel, goal, obs):
     # The only place that knows HOW to call the DWA
-    # (if the DWA moves to dwa.py later, only this function changes)
-
-    # FCreating the node
-    node = Automatic.__new__(Automatic)
-    # Setting up velocity and goal
-    node.vx_cur, node.vy_cur, node.wz_cur = vel
-    gx, gy = goal
-
-    # Running the DWA
-    cmd, score = node._dwa(gx, gy, obs)
-    return cmd, score
+    return dwa_plan(vel, goal, obs)
 
 
 def test_config_unchanged():

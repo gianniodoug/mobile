@@ -5,7 +5,7 @@ from pathlib import Path
 
 import numpy as np
 
-from robot.automatic import Automatic
+from robot.dwa import dwa_plan
 from robot import robot_config as cfg
 
 # Default location of the golden file: robot_ws/src/robot/test/data/dwa_reference.npz
@@ -82,16 +82,13 @@ def make_scene(M, n_walls=4, min_dist=0.25, max_dist=cfg.LIDAR_OBSTACLE_RANGE,
 
 
 def make_dwa_node():
-    return Automatic.__new__(Automatic)
+    # No node is needed anymore since the DWA is in dwa.py
+    return None
 
 
 def run_dwa(node, scene):
-    # Set the current velocity and the goal
-    node.vx_cur, node.vy_cur, node.wz_cur = scene["vel"]
-    gx, gy = scene["goal"]
-
-    # Run the DWA and return the result
-    return node._dwa(gx, gy, scene["obs"])
+    # Run the DWA and return the result (node is not used anymore since the DWA is in dwa.py)
+    return dwa_plan(scene["vel"], scene["goal"], scene["obs"])
 
 
 
