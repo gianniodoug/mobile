@@ -169,13 +169,17 @@ class WheelStep(SteadyNode):
             writer.writerows(self.samples)
         self.get_logger().info(f"Mesures enregistrées dans {self.output}")
 
-        report = analyse(np.array(self.samples), self.rpm_high, self.hold_low, self.hold_high)
+        report = analyse(np.array(self.samples), self.rpm_low, self.rpm_high, self.hold_low, self.hold_high)
         with open(os.path.splitext(self.output)[0] + "_tau.txt", "w") as f:
             f.write(report + "\n")
         self.get_logger().info("\n" + report)
 
 
-def analyse(samples: np.ndarray, rpm_high: float, hold_low: float, hold_high: float,
+MIN_STEP_RATIO = 0.3   # une roue dont l'échelon mesuré est < 30 % de l'échelon demandé « ne répond pas »
+MAX_GAIN_ERROR = 0.15  # au-delà de 15 % d'écart à la consigne, la roue est exclue de la moyenne de tau
+
+
+def analyse(samples: np.ndarray, rpm_low: float, rpm_high: float, hold_low: float, hold_high: float,
             window: float = ENCODER_WINDOW) -> str:
     """samples : colonnes [repeat, after_step, t, FL, FR, BR, BL]."""
     if len(samples) == 0:
@@ -185,6 +189,7 @@ def analyse(samples: np.ndarray, rpm_high: float, hold_low: float, hold_high: fl
              "roue         tau (s)   retard (s)   t63 - h/2 (s)   vitesse finale   écart / consigne   RMSE fit",
              ]
     taus = []
+    problems = []
     for i, w in enumerate(WHEELS):
         t_all, y_all, finals = [], [], []
         for rep in np.unique(samples[:, 0]):
@@ -195,11 +200,15 @@ def analyse(samples: np.ndarray, rpm_high: float, hold_low: float, hold_high: fl
             if len(before) == 0 or len(final) == 0:
                 continue
             n0, n_inf = np.mean(before), np.mean(final)
+            finals.append(n_inf)
+            if abs(n_inf - n0) < MIN_STEP_RATIO * (rpm_high - rpm_low):
+                continue    # pas de réponse exploitable à cet échelon
             t_all.append(after[:, 2])
             y_all.append((after[:, 3 + i] - n0) / (n_inf - n0))
-            finals.append(n_inf)
         if not t_all:
-            lines.append(f"{w:11s}  pas assez de données")
+            final = float(np.mean(finals)) if finals else float("nan")
+            lines.append(f"{w:11s}  NE RÉPOND PAS (vitesse finale {final:.1f} RPM) : roue, moteur ou encodeur à vérifier")
+            problems.append(w)
             continue
         t, y = np.concatenate(t_all), np.concatenate(y_all)
         tau, delay, err = fit_tau(t, y, window)
@@ -207,18 +216,32 @@ def analyse(samples: np.ndarray, rpm_high: float, hold_low: float, hold_high: fl
         crossed = np.nonzero(y[order] >= 0.632)[0]
         t63 = t[order][crossed[0]] - window / 2 if len(crossed) else float("nan")
         final = float(np.mean(finals))
-        taus.append(tau)
+        gain_error = (final - rpm_high) / rpm_high
+        mark = ""
+        if abs(gain_error) > MAX_GAIN_ERROR:
+            mark = "  <- exclue de la moyenne"
+            problems.append(w)
+        else:
+            taus.append(tau)
         lines.append(f"{w:11s}  {tau:7.3f}   {delay:10.3f}   {t63:13.3f}   {final:11.1f} RPM   "
-                     f"{100 * (final - rpm_high) / rpm_high:+14.1f} %   {err:8.3f}")
+                     f"{100 * gain_error:+14.1f} %   {err:8.3f}{mark}")
 
+    lines.append("")
+    if problems:
+        lines += [f"Roues à vérifier : {', '.join(problems)}.",
+                  f"Une roue qui ne répond pas, ou dont la vitesse s'écarte de plus de {MAX_GAIN_ERROR:.0%} de la",
+                  "consigne, a un problème matériel (moteur, encodeur, câblage) ou un polynôme faux.",
+                  "Elle est exclue du calcul de tau.", ""]
     if taus:
-        lines += ["",
-                  f"Écart entre roues : tau de {min(taus):.3f} à {max(taus):.3f} s",
-                  "Si une vitesse finale s'écarte de plus de ~5 % de la consigne, les polynômes ne sont plus",
-                  "à jour : relancer d'abord `ros2 run robot wheel_benchmark`.",
+        lines += [f"Écart entre roues valides : tau de {min(taus):.3f} à {max(taus):.3f} s",
+                  "Entre 5 et 15 % d'écart, les polynômes sont à remesurer (`ros2 run robot wheel_benchmark`).",
                   "",
                   "# À copier dans robot_config.py :",
                   f"WHEEL_TAU = {np.mean(taus):.3f}"]
+        if problems:
+            lines.append(f"# (calculé sur {len(taus)} roue(s) seulement : à confirmer une fois les roues réparées)")
+    else:
+        lines.append("Aucune roue valide : ne pas modifier WHEEL_TAU.")
     return "\n".join(lines)
 
 
