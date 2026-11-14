@@ -28,70 +28,89 @@ def dwa_plan(cur_vel, goal: tuple, obs: np.ndarray):
     wz_arr = np.linspace(max(-DWA_MAX_WZ, wz_cur - acc_w),
                             min( DWA_MAX_WZ, wz_cur + acc_w), DWA_W_SAMPLES)
 
+    # All the 175 combinations as 3 flat arrays (same order as the old nested loops)
+    
+    vx_grid, vy_grid, wz_grid = np.meshgrid(vx_arr, vy_arr, wz_arr, indexing='ij')
+    
+    VX = np.ravel(vx_grid)
+    VY = np.ravel(vy_grid)
+    WZ = np.ravel(wz_grid)
+
+    X, Y, TH = _simulate_trajectory(VX, VY, WZ)
+
     best_score = -np.inf
     best_cmd   = None
 
-    for vx in vx_arr:
-        for vy in vy_arr:
-            for wz in wz_arr:
-                # Simulation de la trajectoire résultante
-                min_cl, fx, fy, ft = _simulate_trajectory(vx, vy, wz, obs)
 
-                # Élimination des trajectoires collisionnelles
-                if min_cl < DWA_ROBOT_RADIUS + DWA_OBSTACLE_MARGIN:
-                    continue
-                
-                # Calcul des composantes de la fonction de coût (normalisées entre 0 et 1)
-                heading_score   = (1.0 + math.cos(
-                    _angle_wrap(math.atan2(goal_ly, goal_lx) - ft))) / 2.0
-                clearance_score = min(min_cl, LIDAR_MAX_RANGE_M) / LIDAR_MAX_RANGE_M
-                velocity_score  = math.hypot(vx, vy) / math.hypot(DWA_MAX_VX, DWA_MAX_VY)
-                final_dist      = math.hypot(goal_lx - fx, goal_ly - fy)
-                max_possible    = math.hypot(goal_lx, goal_ly) + DWA_MAX_VX * DWA_SIM_TIME
-                goal_dist_score = 1.0 - min(final_dist / max(max_possible, 1e-6), 1.0)
+    for i in range(len(VX)):
+        vx, vy, wz = VX[i], VY[i], WZ[i]
 
-                # Somme pondérée
-                score = (DWA_W_HEADING   * heading_score
-                        + DWA_W_CLEARANCE * clearance_score
-                        + DWA_W_VELOCITY  * velocity_score
-                        + DWA_W_GOAL_DIST * goal_dist_score)
+        # Final pose of candidate i
+        fx = X[i, -1]
+        fy = Y[i, -1]
+        ft = TH[i]
 
-                if score > best_score:
-                    best_score = score
-                    best_cmd   = (vx, vy, wz)
+        # Smallest distance to an obstacle along trajectory i
+        if obs.shape[0] == 0:
+            min_cl = LIDAR_MAX_RANGE_M
+        else:
+            min_cl = np.inf
+            for k in range(DWA_SIM_STEPS):
+                dists = np.hypot(obs[:, 0] - X[i, k], obs[:, 1] - Y[i, k])
+                min_d = float(dists.min())
+                if min_d < min_cl:
+                    min_cl = min_d
+
+        # Élimination des trajectoires collisionnelles
+        if min_cl < DWA_ROBOT_RADIUS + DWA_OBSTACLE_MARGIN:
+            continue
+
+        # Calcul des composantes de la fonction de coût (normalisées entre 0 et 1)
+        heading_score   = (1.0 + math.cos(
+            _angle_wrap(math.atan2(goal_ly, goal_lx) - ft))) / 2.0
+        clearance_score = min(min_cl, LIDAR_MAX_RANGE_M) / LIDAR_MAX_RANGE_M
+        velocity_score  = math.hypot(vx, vy) / math.hypot(DWA_MAX_VX, DWA_MAX_VY)
+        final_dist      = math.hypot(goal_lx - fx, goal_ly - fy)
+        max_possible    = math.hypot(goal_lx, goal_ly) + DWA_MAX_VX * DWA_SIM_TIME
+        goal_dist_score = 1.0 - min(final_dist / max(max_possible, 1e-6), 1.0)
+
+        # Somme pondérée
+        score = (DWA_W_HEADING   * heading_score
+               + DWA_W_CLEARANCE * clearance_score
+               + DWA_W_VELOCITY  * velocity_score
+               + DWA_W_GOAL_DIST * goal_dist_score)
+
+        if score > best_score:
+            best_score = score
+            best_cmd   = (vx, vy, wz)
 
     return best_cmd, best_score
 
 
 
 # Intégration d'Euler pour prédire la position future
-def _simulate_trajectory(vx, vy, wz, obs):
+def _simulate_trajectory(VX, VY, WZ):
+    n = len(VX)
     dt = DWA_SIM_TIME / DWA_SIM_STEPS
-    x, y, theta = 0.0, 0.0, 0.0
-    min_clearance = np.inf
+    x, y, theta = np.zeros(n), np.zeros(n), np.zeros(n) 
 
-    for _ in range(DWA_SIM_STEPS):
-        cos_t = math.cos(theta)
-        sin_t = math.sin(theta)
+    X = np.zeros((n, DWA_SIM_STEPS))
+    Y = np.zeros((n, DWA_SIM_STEPS))
+
+    for k in range(DWA_SIM_STEPS):
+        cos_t = np.cos(theta)
+        sin_t = np.sin(theta)
         # Modèle cinématique d'un robot holonome
-        x    += (vx * cos_t - vy * sin_t) * dt
-        y    += (vx * sin_t + vy * cos_t) * dt
-        theta = _angle_wrap(theta + wz * dt)
+        x    += (VX * cos_t - VY * sin_t) * dt
+        y    += (VX * sin_t + VY * cos_t) * dt
+        theta = theta + WZ * dt
 
-        if obs.shape[0] > 0:
-            dists = np.hypot(obs[:, 0] - x, obs[:, 1] - y)
-            min_d = float(dists.min())
-            if min_d < min_clearance:
-                min_clearance = min_d
-            # Arrêt prématuré si collision fatale détectée
-            if min_d < DWA_LETHAL_DIST:
-                return min_d, x, y, theta
+        X[:,k] = x
+        Y[:,k] = y
 
-    if obs.shape[0] == 0:
-        min_clearance = LIDAR_MAX_RANGE_M
+    return X, Y, theta
 
-    return min_clearance, x, y, theta
-
+        
 
 # Fonctions utilitaires
 def _angle_wrap(angle: float) -> float:
