@@ -67,13 +67,13 @@ MAX_ACCUMULATED_ERROR = 1000.0
 # Asservissement par retour d'état modal avec action intégrale
 # (voir Documentation/asservissement_retour_etat.pdf, mêmes notations)
 CONTROL_MODE = "state"  # "state" : retour d'état modal, "pid" : ancien PID par roue
-WHEEL_TAU = 0.11         # Constante de temps d'une roue linéarisée (s), à identifier (pdf, section « Identification de tau »)
+WHEEL_TAU = 0.155         # Constante de temps d'une roue linéarisée (s), à identifier (pdf, section « Identification de tau »)
 SF_XI = 0.9             # Amortissement imposé à chaque mode
 SF_OMEGA0 = {           # Pulsation propre imposée à chaque mode (rad/s)
-    "x": 6.0,           # avance
-    "y": 8.0,           # latéral (déviation)
-    "theta": 8.0,       # rotation (déviation)
-    "t": 6.0,           # torsion
+    "x": 5.0,           # avance
+    "y": 6.0,           # latéral (déviation)
+    "theta": 6.0,       # rotation (déviation)
+    "t": 5.0,           # torsion
 }
 SF_USE_POSE = True                 # Utilise /robot/pos (odométrie + ICP) pour q_theta et q_y en ligne droite
 SF_POSE_TIMEOUT = 0.5              # Au-delà de cet âge (s), la pose est ignorée
