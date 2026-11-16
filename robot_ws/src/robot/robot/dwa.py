@@ -38,6 +38,8 @@ def dwa_plan(cur_vel, goal: tuple, obs: np.ndarray):
 
     X, Y, TH = _simulate_trajectory(VX, VY, WZ)
 
+    MIN_CL = _min_clearance(X, Y, obs)
+
     best_score = -np.inf
     best_cmd   = None
 
@@ -51,15 +53,7 @@ def dwa_plan(cur_vel, goal: tuple, obs: np.ndarray):
         ft = TH[i]
 
         # Smallest distance to an obstacle along trajectory i
-        if obs.shape[0] == 0:
-            min_cl = LIDAR_MAX_RANGE_M
-        else:
-            min_cl = np.inf
-            for k in range(DWA_SIM_STEPS):
-                dists = np.hypot(obs[:, 0] - X[i, k], obs[:, 1] - Y[i, k])
-                min_d = float(dists.min())
-                if min_d < min_cl:
-                    min_cl = min_d
+        min_cl = MIN_CL[i]
 
         # Élimination des trajectoires collisionnelles
         if min_cl < DWA_ROBOT_RADIUS + DWA_OBSTACLE_MARGIN:
@@ -117,3 +111,28 @@ def _angle_wrap(angle: float) -> float:
     while angle > math.pi:  angle -= 2 * math.pi
     while angle < -math.pi: angle += 2 * math.pi
     return angle
+
+# Distance minimale aux obstacles le long de chaque trajectoire
+def _min_clearance(X, Y, obs):
+    # X, Y: (n, DWA_SIM_STEPS) positions; obs: (M, 2)
+    # Returns an array (n,): for each candidate, the smallest distance to any obstacle at any step
+    n = X.shape[0]
+
+    # No obstacles: every candidate gets the maximum range
+    if obs.shape[0] == 0:
+        return np.full(n, LIDAR_MAX_RANGE_M)
+
+    # Running minimum, one per candidate
+    min_cl = np.full(n, np.inf)
+
+    for k in range(DWA_SIM_STEPS):
+        # Distance from every candidate (rows) to every obstacle (columns) at step k
+        dx = X[:, k, None] - obs[:, 0]
+        dy = Y[:, k, None] - obs[:, 1]
+        dists = np.hypot(dx, dy)
+
+        # Closest obstacle of each candidate at this step, then keep the smallest so far
+        step_min = dists.min(axis=1)
+        min_cl = np.minimum(min_cl, step_min)
+
+    return min_cl
