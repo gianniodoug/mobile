@@ -1,4 +1,5 @@
 import numpy as np
+from scipy.spatial import cKDTree
 import math
 from robot.robot_config import (
     AUTO_LOOP_HZ,
@@ -122,17 +123,15 @@ def _min_clearance(X, Y, obs):
     if obs.shape[0] == 0:
         return np.full(n, LIDAR_MAX_RANGE_M)
 
-    # Running minimum, one per candidate
-    min_cl = np.full(n, np.inf)
+    # Tree built once per decision from the obstacle points
+    tree = cKDTree(obs)
 
-    for k in range(DWA_SIM_STEPS):
-        # Distance from every candidate (rows) to every obstacle (columns) at step k
-        dx = X[:, k, None] - obs[:, 0]
-        dy = Y[:, k, None] - obs[:, 1]
-        dists = np.hypot(dx, dy)
+    # All the positions of all the trajectories in one (n * DWA_SIM_STEPS, 2) array
+    positions = np.column_stack((X.ravel(), Y.ravel()))
 
-        # Closest obstacle of each candidate at this step, then keep the smallest so far
-        step_min = dists.min(axis=1)
-        min_cl = np.minimum(min_cl, step_min)
+    # Distance from every position to its nearest obstacle, in one call
+    dists, _ = tree.query(positions)
 
-    return min_cl
+    # One row per candidate, one column per step, then the closest point of each trajectory
+    dists = dists.reshape(n, DWA_SIM_STEPS)
+    return dists.min(axis=1)
