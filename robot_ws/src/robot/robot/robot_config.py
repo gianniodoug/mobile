@@ -54,7 +54,7 @@ BR_KD = 0
 BL_KP = 2.37
 BL_KI = 7.74
 BL_KD = 0
-MAX_ACCUMULATED_ERROR = 1000.0
+MAX_ACCUMULATED_ERROR = 100.0
 
 # Timers Periods
 WHEEL_UPDATING_PERIOD = 0.02 # Période du timer qui envoie à l'arduino les nouvelles vitesses des roues
@@ -102,8 +102,8 @@ GEAR_RATIO   = 1.0   # Rapport de réduction (1.0 = RPM moteur == RPM roue)
 
 
 # -- Paramètres des actionneurs --
-MAX_RPM = 160.0  # RPM maximum envoyé aux roues (même échelle que la console)
-MIN_RPM = 130.0  # RPM minimum envoyé aux roues
+MAX_RPM = 130.0  # RPM maximum envoyé aux roues (même échelle que la console)
+MIN_RPM = 100.0  # RPM minimum envoyé aux roues
 
 
 # -- Paramètres du Lidar --
@@ -138,7 +138,7 @@ DWA_LETHAL_DIST = 0.0  # m     distance en dessous de laquelle on bloque
 DWA_W_HEADING = 0.2  # poids cap vers le but
 DWA_W_CLEARANCE = 0.1  # poids distance aux obstacles
 DWA_W_VELOCITY = 0.1  # poids vitesse (favorise les trajectoires rapides)
-DWA_W_GOAL_DIST = 0.2  # poids distance euclidienne au but
+DWA_W_GOAL_DIST = 0.3  # poids distance euclidienne au but
 
 # Seuils d'arrivée
 NAV_GOAL_DIST_TOL = 0.15  # m     on considère le but atteint

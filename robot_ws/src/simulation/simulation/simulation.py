@@ -15,10 +15,7 @@ SCREEN_HEIGHT = 800
 PIXELS_PER_METER = 100.0
 
 # Paramètres du robot physique
-WHEEL_RADIUS = 0.04
-LX = 0.15
-LY = 0.15
-
+from robot.robot_config import WHEEL_RADIUS, LX, LY
 
 class SimulationNode(Node):
     """
@@ -31,7 +28,7 @@ class SimulationNode(Node):
         self.pub_lidar = self.create_publisher(Lidar, '/robot/lidar', 10)
         self.pub_lidar_obstacles = self.create_publisher(Lidar, '/robot/lidar_obstacles', 10)
         self.pub_encoders = self.create_publisher(RPMs, '/robot/encoders', 10)
-
+    
         # Abonnements
         self.create_subscription(Pose2D, "/robot/pos", self.pos_callback, 10)
         self.create_subscription(RPMs, "/robot/command", self.cmd_callback, 10)
