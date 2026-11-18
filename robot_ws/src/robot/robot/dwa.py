@@ -86,7 +86,7 @@ def dwa_plan(cur_vel, goal: tuple, obs: np.ndarray):
 def _simulate_trajectory(VX, VY, WZ):
     n = len(VX)
     dt = DWA_SIM_TIME / DWA_SIM_STEPS
-    x, y, thita = np.zeros(n), np.zeros(n), np.zeros(n) 
+    x, y, theta = np.zeros(n), np.zeros(n), np.zeros(n) 
 
     X = np.zeros((n, DWA_SIM_STEPS))
     Y = np.zeros((n, DWA_SIM_STEPS))
@@ -97,12 +97,12 @@ def _simulate_trajectory(VX, VY, WZ):
         # Modèle cinématique d'un robot holonome
         x   += (VX * cos_t - VY * sin_t) * dt
         y   += (VX * sin_t + VY * cos_t) * dt
-        thita = thita + WZ * dt
+        theta = theta + WZ * dt
 
         X[:,k] = x
         Y[:,k] = y
 
-    return X, Y, thita
+    return X, Y, theta
 
         
 
