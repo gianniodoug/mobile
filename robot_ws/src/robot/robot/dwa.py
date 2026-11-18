@@ -29,7 +29,6 @@ def dwa_plan(cur_vel, goal: tuple, obs: np.ndarray):
     wz_arr = np.linspace(max(-DWA_MAX_WZ, wz_cur - acc_w),
                             min( DWA_MAX_WZ, wz_cur + acc_w), DWA_W_SAMPLES)
 
-    # All the 175 combinations as 3 flat arrays (same order as the old nested loops)
     
     vx_grid, vy_grid, wz_grid = np.meshgrid(vx_arr, vy_arr, wz_arr, indexing='ij')
     
@@ -87,7 +86,7 @@ def dwa_plan(cur_vel, goal: tuple, obs: np.ndarray):
 def _simulate_trajectory(VX, VY, WZ):
     n = len(VX)
     dt = DWA_SIM_TIME / DWA_SIM_STEPS
-    x, y, theta = np.zeros(n), np.zeros(n), np.zeros(n) 
+    x, y, thita = np.zeros(n), np.zeros(n), np.zeros(n) 
 
     X = np.zeros((n, DWA_SIM_STEPS))
     Y = np.zeros((n, DWA_SIM_STEPS))
@@ -96,14 +95,14 @@ def _simulate_trajectory(VX, VY, WZ):
         cos_t = np.cos(theta)
         sin_t = np.sin(theta)
         # Modèle cinématique d'un robot holonome
-        x    += (VX * cos_t - VY * sin_t) * dt
-        y    += (VX * sin_t + VY * cos_t) * dt
-        theta = theta + WZ * dt
+        x   += (VX * cos_t - VY * sin_t) * dt
+        y   += (VX * sin_t + VY * cos_t) * dt
+        thita = thita + WZ * dt
 
         X[:,k] = x
         Y[:,k] = y
 
-    return X, Y, theta
+    return X, Y, thita
 
         
 
@@ -113,25 +112,23 @@ def _angle_wrap(angle: float) -> float:
     while angle < -math.pi: angle += 2 * math.pi
     return angle
 
-# Distance minimale aux obstacles le long de chaque trajectoire
+# Mininum distance from object for every path
 def _min_clearance(X, Y, obs):
-    # X, Y: (n, DWA_SIM_STEPS) positions; obs: (M, 2)
-    # Returns an array (n,): for each candidate, the smallest distance to any obstacle at any step
-    n = X.shape[0]
+    s = X.shape[0]
 
-    # No obstacles: every candidate gets the maximum range
+    # Set obstacles at max radius in case we have nothing close to us
     if obs.shape[0] == 0:
         return np.full(n, LIDAR_MAX_RANGE_M)
 
-    # Tree built once per decision from the obstacle points
     tree = cKDTree(obs)
 
-    # All the positions of all the trajectories in one (n * DWA_SIM_STEPS, 2) array
-    positions = np.column_stack((X.ravel(), Y.ravel()))
+    x_rav = X.ravel()
+    y_rav = Y.ravel()
+    positions = np.column_stack((x_rav, y_rav))
 
-    # Distance from every position to its nearest obstacle, in one call
     dists, _ = tree.query(positions)
 
-    # One row per candidate, one column per step, then the closest point of each trajectory
-    dists = dists.reshape(n, DWA_SIM_STEPS)
+    dists = dists.reshape(s, DWA_SIM_STEPS)
+
+
     return dists.min(axis=1)
