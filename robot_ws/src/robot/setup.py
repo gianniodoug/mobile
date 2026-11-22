@@ -29,6 +29,7 @@ setup(
             'automatic = robot.automatic:main',
             'localization = robot.localization:main',
             'encoders = robot.encoders:main',
+            'global_planner = robot.global_planner:main'
         ],
     },
 )
