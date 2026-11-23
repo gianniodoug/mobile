@@ -30,7 +30,7 @@ def astar(occ, start, goal):
             if node not in g or g[node] > g[examined] + dist:
                 g[node] = g[examined] + dist
                 parent[node] = examined
-                heapq.heappush(frontier, (g[node], node))
+                heapq.heappush(frontier, (g[node] + _heuristic(node, goal), node))
 
     return None
 
@@ -40,7 +40,10 @@ def astar(occ, start, goal):
     
 
 def _heuristic(cell, goal):
-    pass
+    y_cell, x_cell = cell
+    y_goal, x_goal = goal
+
+    return math.hypot(y_cell - y_goal, x_cell - x_goal)
 
 def _neighbors(occ, cur_pos):
     neighbors = []
