@@ -118,7 +118,7 @@ def _min_clearance(X, Y, obs):
 
     # Set obstacles at max radius in case we have nothing close to us
     if obs.shape[0] == 0:
-        return np.full(n, LIDAR_MAX_RANGE_M)
+        return np.full(s, LIDAR_MAX_RANGE_M)
 
     tree = cKDTree(obs)
 
