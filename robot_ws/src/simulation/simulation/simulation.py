@@ -29,7 +29,7 @@ class SimulationNode(Node):
         # Publishers
         self.pub_lidar = self.create_publisher(Lidar, '/robot/lidar', 10)
         self.pub_lidar_obstacles = self.create_publisher(Lidar, '/robot/lidar_obstacles', 10)
-        self.pub_encoders = self.create_publisher(RPMs, '/robot/encoders', 10)
+        self.pub_encoders = self.create_publisher(RPMs, '/robot/encoders', 1)
         if PUBLISH_GT_POSE:
             self.pub_gt = self.create_publisher(Pose2D, '/robot/pos', 10)
     
@@ -338,7 +338,8 @@ def main():
 
     running = True
     while running and rclpy.ok():
-        rclpy.spin_once(sim_node, timeout_sec=0.0)
+        for _ in range (10):
+            rclpy.spin_once(sim_node, timeout_sec=0.0)
 
         # Evénements Pygame
         for event in pygame.event.get():
