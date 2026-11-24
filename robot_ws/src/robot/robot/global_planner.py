@@ -16,6 +16,8 @@ map_qos = QoSProfile(depth=1,
 
 CONSIDERED_OCCUPIED = 65
 
+PLANNER_EXTRA = 0.15
+
 
 
 class Global_Planner(SteadyNode):
@@ -57,7 +59,7 @@ class Global_Planner(SteadyNode):
     def plan_callback(self):
         if self.grid is None:
             return
-        r = math.ceil((DWA_ROBOT_RADIUS + DWA_OBSTACLE_MARGIN) / self.map_res)
+        r = math.ceil((DWA_ROBOT_RADIUS + DWA_OBSTACLE_MARGIN + PLANNER_EXTRA) / self.map_res)
         
         occ = make_occ(self.grid, CONSIDERED_OCCUPIED, r)
         start = world_to_cell(self.robot_x, self.robot_y, self.map_origin_x, self.map_origin_y, self.map_res, self.grid.shape)
@@ -73,7 +75,12 @@ class Global_Planner(SteadyNode):
         # that's cause when the robot starts close to a wall
         # it sees its location as occupied due to the inflation
         # so we ensure a safe start like that
-        occ[start] = False
+        # we only remove the inflation around the robot, the real walls stay
+        iy, ix = start
+        y0, y1 = max(0, iy - r), iy + r + 1
+        x0, x1 = max(0, ix - r), ix + r + 1
+        occ[y0:y1, x0:x1] = self.grid[y0:y1, x0:x1] > CONSIDERED_OCCUPIED
+
         cells = astar(occ, start, goal)
         if cells is None:
             self.get_logger().warn("No possible trajectory could be found")
