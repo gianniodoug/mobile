@@ -7,6 +7,8 @@ from robot.dwa import dwa_plan
 from msgs.msg import Lidar, RPMs
 from geometry_msgs.msg import Pose2D, Point
 from std_msgs.msg import Bool
+from nav_msgs.msg import Path
+from robot.planner_utils import short_targ
 
 from robot.robot_config import (
     MAX_RPM, MIN_RPM, LIDAR_MIN_DIST, LIDAR_MAX_RANGE_M,
@@ -20,6 +22,8 @@ from robot.robot_config import (
     OBSTACLE_MEMORY_SEC, LIDAR_STALE_SEC, STUCK_COUNT_THRESH,
     RECOVERY_BACKUP_S, RECOVERY_ROTATE_S, RECOVERY_VX, RECOVERY_WZ
 )
+LOOKAHEAD = 0.6
+TIME_LIMIT = 3.0
 
 # Fonctions utilitaires
 def _clamp(v: float, lo: float, hi: float) -> float:
@@ -36,6 +40,7 @@ class Automatic(SteadyNode):
         self.create_subscription(Pose2D, '/robot/pos',               self.pos_callback,    10)
         self.create_subscription(Point,  '/robot/automatic_goal',    self.goal_callback,   10)
         self.create_subscription(Bool,   '/robot/enable_auto',       self.enable_auto_callback, 10)
+        self.create_subscription (Path, '/robot/nav_path', self.path_callback, 10)
 
         # -- Publication --
         self.pub_cmd = self.create_publisher(RPMs, '/robot/command', 10)
@@ -72,6 +77,9 @@ class Automatic(SteadyNode):
         # Le signe de rotation alterne à chaque récupération pour éviter
         # de toujours tourner du même côté.
         self._recovery_wz_sign : float = 1.0
+
+        self.path = None
+        self.path_stamp = 0.0
 
         # Timer de la boucle d'asservissement
         self.create_timer(1.0 / AUTO_LOOP_HZ, self.control_loop)
@@ -126,6 +134,12 @@ class Automatic(SteadyNode):
         self.robot_y     = msg.y
         self.robot_theta = msg.theta
 
+    def path_callback(self, msg: Path):
+        if len(msg.poses) == 0:
+            return
+        
+        self.path = np.array([(p.pose.position.x, p.pose.position.y) for p in msg.poses])
+        self.path_stamp = time.monotonic()
 
     # -- Boucle principale --
 
@@ -160,6 +174,13 @@ class Automatic(SteadyNode):
         if self._lidar_last_stamp > 0 and lidar_age > LIDAR_STALE_SEC:
             self.get_logger().warn(f"Lidar périmé ({lidar_age:.2f}s)")
 
+        tx, ty = self.goal_x, self.goal_y
+        if (self.path is not None and
+            time.monotonic() - self.path_stamp < TIME_LIMIT and
+            math.hypot(self.path[-1, 0] - self.goal_x, self.path[-1, 1] - self.goal_y) < 0.2):
+            tx, ty = short_targ(self.path, self.robot_x, self.robot_y, LOOKAHEAD)
+            
+
         # Cible atteinte ?
         dist_to_goal = math.hypot(self.goal_x - self.robot_x, self.goal_y - self.robot_y)
         if dist_to_goal < NAV_GOAL_DIST_TOL:
@@ -168,8 +189,10 @@ class Automatic(SteadyNode):
             self._stop()
             return
 
+        
+
         # But en repère robot
-        dx, dy       = self.goal_x - self.robot_x, self.goal_y - self.robot_y
+        dx, dy       = tx - self.robot_x, ty - self.robot_y
         cos_t, sin_t = math.cos(self.robot_theta), math.sin(self.robot_theta)
         goal_lx      =  dx * cos_t + dy * sin_t
         goal_ly      = -dx * sin_t + dy * cos_t
@@ -280,6 +303,7 @@ class Automatic(SteadyNode):
 
     #  Public
     def set_goal(self, x: float, y: float):
+        self.path = None
         self.goal_x       = x
         self.goal_y       = y
         self.goal_reached = False

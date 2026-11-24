@@ -31,3 +31,17 @@ def cell_to_world(iy, ix, origin_x, origin_y, resol):
     y = (iy + 0.5) * resol + origin_y
 
     return (x, y)
+
+
+
+
+def short_targ(path, rx, ry, lookahead):
+    dist = np.hypot(path[:, 0] - rx, path[:, 1] - ry)
+    m = np.argmin(dist)
+    points = dist[m:] >= lookahead
+    if points.any():
+        my_point = np.argmax(points)
+    else:
+        return path[-1]
+
+    return path[m + my_point]
