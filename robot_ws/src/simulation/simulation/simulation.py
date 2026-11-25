@@ -10,7 +10,7 @@ from geometry_msgs.msg import Pose2D
 # --- CONSTANTES ---
 FPS = 30
 FREQ_PUB = 0.1  # 10 Hz pour les capteurs simulés
-PUBLISH_GT_POSE = True
+PUBLISH_GT_POSE = False
 ROBOT_RADIUS = 0.15
 SCREEN_WIDTH = 1200
 SCREEN_HEIGHT = 800
