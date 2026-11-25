@@ -25,13 +25,13 @@ Commands :
     >> setpwm <all_wheels_pwm>
     >> setpwm
 - stop: equivalent to setrpm 0
-- setkp, setki, setkd: sets a coefficient for the servoing (asservissement) of a given wheel. Can be used like so :
-    >> setkp frontleft 0.3
+- setkp, setki, setkd: sets a coefficient for the servoing (asservissement) of a given wheel. Can be used like so :    >> setkp frontleft 0.3
     >> setkd backright 2.3
     >> setkp 2.5 (sets kp to 2.5 for all wheels)  
 - setki, setkd work the same way
 - printpid: prints the current PID coefficients for all wheels
     >> printpid
+- savemap: saves the current occupancy grid map (PNG + NPZ) in GRID_SAVE_DIR (default ~/robot_maps)
 - help: prints this message                  
 """
 
@@ -91,6 +91,19 @@ ICP_INLIER_RMSE_THRESHOLD = 0.15              # Erreur de distance max acceptée
 ICP_MAP_UPDATE_FITNESS    = 0.85              # Score min de fitness pour autoriser l'ajout à la carte
 ICP_MIN_POINTS            = 30                # Nombre minimum de points requis pour lancer l'algo ICP
 ENCODER_NOISE_THRESHOLD = 0.5
+
+# -- Grille d'occupation (cartographie) --
+# La carte est centree sur la pose de depart du robot : elle couvre +/- GRID_SIZE_M/2 autour.
+GRID_RESOLUTION      = 0.05    # Taille d'une cellule (m)
+GRID_SIZE_M          = 40.0    # Cote de la zone cartographiable (m) -> 800 x 800 cellules
+GRID_LOGODDS_OCC     = 0.85    # Increment de log-odds quand un faisceau touche la cellule
+GRID_LOGODDS_FREE    = -0.40   # Increment quand un faisceau traverse la cellule (negatif)
+GRID_LOGODDS_MIN     = -4.0    # Bornes : permettent a une cellule de changer d'avis
+GRID_LOGODDS_MAX     = 4.0
+GRID_PUBLISH_PERIOD  = 1.0     # Periode de publication de /robot/map (s)
+GRID_MAX_OMEGA       = 0.4     # Pas d'integration au-dela de cette vitesse de rotation (rad/s), 0 = desactive
+                               # (le scan est deforme quand le robot tourne vite : pas de deskewing)
+GRID_SAVE_DIR        = '~/robot_maps'
 
 
 # -- Paramètres généraux du robot --

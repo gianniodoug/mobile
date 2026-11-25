@@ -10,6 +10,8 @@ from geometry_msgs.msg import Pose2D
 # --- CONSTANTES ---
 FPS = 30
 FREQ_PUB = 0.1  # 10 Hz pour les capteurs simulés
+PUBLISH_GT_POSE = False
+ROBOT_RADIUS = 0.15
 SCREEN_WIDTH = 1200
 SCREEN_HEIGHT = 800
 PIXELS_PER_METER = 100.0
@@ -27,7 +29,9 @@ class SimulationNode(Node):
         # Publishers
         self.pub_lidar = self.create_publisher(Lidar, '/robot/lidar', 10)
         self.pub_lidar_obstacles = self.create_publisher(Lidar, '/robot/lidar_obstacles', 10)
-        self.pub_encoders = self.create_publisher(RPMs, '/robot/encoders', 10)
+        self.pub_encoders = self.create_publisher(RPMs, '/robot/encoders', 1)
+        if PUBLISH_GT_POSE:
+            self.pub_gt = self.create_publisher(Pose2D, '/robot/pos', 10)
     
         # Abonnements
         self.create_subscription(Pose2D, "/robot/pos", self.pos_callback, 10)
@@ -72,7 +76,10 @@ class SimulationNode(Node):
 
             # Obstacles intérieurs
             #pymunk.Segment(static_body, (-3.5, 2.0), (-1.5, 0.0), 0.05),
-            pymunk.Segment(static_body, (2.0, 2.5), (2.0, -1.5), 0.05),
+            #pymunk.Segment(static_body, (2.0, 2.5), (2.0, -1.5), 0.05),
+            pymunk.Segment(static_body, (1.0, 0.8), (2.0, 0.8), 0.15),
+            pymunk.Segment(static_body, (1.0, -0.8), (2.0, -0.8), 0.15),
+            pymunk.Segment(static_body, (2.0, 0.8), (2.0, -0.8), 0.15),
             #pymunk.Segment(static_body, (-2.0, -2.5), (0.5, -2.5), 0.05)
         ]
 
@@ -87,12 +94,18 @@ class SimulationNode(Node):
     def create_robot_in_meters(self):
         mass = 1.0
         # Taille du robot: 0.3 mètres
-        size = (0.3, 0.3)
-        moment = pymunk.moment_for_box(mass, size)
+        #size = (0.3, 0.3)
+        #moment = pymunk.moment_for_box(mass, size)
+
+        radius = 0.15
+        moment = pymunk.moment_for_circle(mass, 0, radius)
+
         body = pymunk.Body(mass, moment)
         body.position = (0.0, 0.0) # Départ au centre (0,0)
 
-        shape = pymunk.Poly.create_box(body, size, radius=0.01)
+        shape = pymunk.Circle(body, radius)
+
+        #shape = pymunk.Poly.create_box(body, size, radius=0.01)
         shape.elasticity = 0.0
         shape.friction = 0.0
         shape.filter = pymunk.ShapeFilter(categories=0b01, mask=0b10)
@@ -111,11 +124,23 @@ class SimulationNode(Node):
             msg.back_right_rpm, msg.back_left_rpm
         ]
 
+    def _collides(self, x, y):
+        for wall in self.walls:
+            ax, ay, bx, by = wall.a.x, wall.a.y, wall.b.x, wall.b.y
+            dx, dy = bx - ax, by - ay
+            t = ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy)
+            t = max(0.0, min(1.0, t))
+            px, py = ax + t * dx, ay + t * dy
+            if math.hypot(x - px, y - py) < ROBOT_RADIUS + wall.radius:
+                return True
+        return False
+
     def update_physics(self):
         current_time = time()
         dt = current_time - self.last_update
         self.last_update = current_time
         if dt <= 0: return
+        dt = min(dt, 0.05)
 
         # 1. Inertie (Ce que les moteurs essaient de faire)
         for i in range(4):
@@ -136,20 +161,19 @@ class SimulationNode(Node):
         v_gx_cmd = vx_cmd * math.cos(self.gt_theta) - vy_cmd * math.sin(self.gt_theta)
         v_gy_cmd = vx_cmd * math.sin(self.gt_theta) + vy_cmd * math.cos(self.gt_theta)
 
-        self.robot_body.velocity = (v_gx_cmd, v_gy_cmd)
-        self.robot_body.angular_velocity = w_cmd
-
-        # --- SAUVEGARDE AVANT PHYSIQUE ---
-        old_x = self.robot_body.position.x
-        old_y = self.robot_body.position.y
+        old_x = self.gt_x
+        old_y = self.gt_y
         old_theta = self.robot_body.angle
 
-        # 3. Résolution des collisions
-        self.space.step(dt)
+        new_x = old_x + v_gx_cmd * dt
+        new_y = old_y + v_gy_cmd * dt
+        if self._collides(new_x, new_y):
+            new_x, new_y = old_x, old_y
+        self.robot_body.position = (new_x, new_y)
+        self.robot_body.angle = old_theta + w_cmd * dt
 
-        # --- LECTURE APRES PHYSIQUE ---
-        self.gt_x = self.robot_body.position.x
-        self.gt_y = self.robot_body.position.y
+        self.gt_x = new_x
+        self.gt_y = new_y
         self.gt_theta = self.robot_body.angle
 
         # Normalisation de l'angle
@@ -231,6 +255,11 @@ class SimulationNode(Node):
         if len(obstacle_msg.distances) > 0:
             self.pub_lidar_obstacles.publish(obstacle_msg)
 
+        if PUBLISH_GT_POSE:
+            gt = Pose2D()
+            gt.x, gt.y, gt.theta = float(self.gt_x), float(self.gt_y), float(self.gt_theta)
+            self.pub_gt.publish(gt)
+
 
 class Renderer:
     """
@@ -309,7 +338,8 @@ def main():
 
     running = True
     while running and rclpy.ok():
-        rclpy.spin_once(sim_node, timeout_sec=0.0)
+        for _ in range (10):
+            rclpy.spin_once(sim_node, timeout_sec=0.0)
 
         # Evénements Pygame
         for event in pygame.event.get():
